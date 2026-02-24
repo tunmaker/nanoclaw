@@ -22,7 +22,7 @@ describe('fetch-upstream.sh', () => {
     const seedDir = fs.mkdtempSync(
       path.join(os.tmpdir(), 'nanoclaw-seed-'),
     );
-    execSync('git init', { cwd: seedDir, stdio: 'pipe' });
+    execSync('git init -b main', { cwd: seedDir, stdio: 'pipe' });
     execSync('git config user.email "test@test.com"', {
       cwd: seedDir,
       stdio: 'pipe',
