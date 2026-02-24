@@ -27,6 +27,9 @@ export interface WhatsAppChannelOpts {
   registeredGroups: () => Record<string, RegisteredGroup>;
 }
 
+const RECONNECT_BASE_MS = 2_000;
+const RECONNECT_MAX_MS = 5 * 60 * 1_000; // 5 minutes
+
 export class WhatsAppChannel implements Channel {
   name = 'whatsapp';
 
@@ -36,6 +39,8 @@ export class WhatsAppChannel implements Channel {
   private outgoingQueue: Array<{ jid: string; text: string }> = [];
   private flushing = false;
   private groupSyncTimerStarted = false;
+  private reconnectAttempts = 0;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   private opts: WhatsAppChannelOpts;
 
@@ -85,21 +90,14 @@ export class WhatsAppChannel implements Channel {
         logger.info({ reason, shouldReconnect, queuedMessages: this.outgoingQueue.length }, 'Connection closed');
 
         if (shouldReconnect) {
-          logger.info('Reconnecting...');
-          this.connectInternal().catch((err) => {
-            logger.error({ err }, 'Failed to reconnect, retrying in 5s');
-            setTimeout(() => {
-              this.connectInternal().catch((err2) => {
-                logger.error({ err: err2 }, 'Reconnection retry failed');
-              });
-            }, 5000);
-          });
+          this.scheduleReconnect();
         } else {
           logger.info('Logged out. Run /setup to re-authenticate.');
           process.exit(0);
         }
       } else if (connection === 'open') {
         this.connected = true;
+        this.reconnectAttempts = 0;
         logger.info('Connected to WhatsApp');
 
         // Announce availability so WhatsApp relays subsequent presence updates (typing indicators)
@@ -237,7 +235,28 @@ export class WhatsAppChannel implements Channel {
 
   async disconnect(): Promise<void> {
     this.connected = false;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     this.sock?.end(undefined);
+  }
+
+  private scheduleReconnect(): void {
+    const exponential = RECONNECT_BASE_MS * Math.pow(2, this.reconnectAttempts);
+    const capped = Math.min(exponential, RECONNECT_MAX_MS);
+    const jitter = Math.round(capped * 0.2 * Math.random());
+    const delay = capped + jitter;
+
+    this.reconnectAttempts++;
+    logger.info({ attempt: this.reconnectAttempts, delayMs: delay }, 'Reconnecting...');
+
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.connectInternal().catch((err) => {
+        logger.error({ err }, 'Reconnect attempt failed');
+      });
+    }, delay);
   }
 
   async setTyping(jid: string, isTyping: boolean): Promise<void> {

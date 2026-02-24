@@ -4,6 +4,7 @@
  */
 import { execSync } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import Database from 'better-sqlite3';
@@ -122,6 +123,7 @@ const timeout = setTimeout(() => {
   process.exit(1);
 }, 30000);
 
+let done = false;
 sock.ev.on('creds.update', saveCreds);
 
 sock.ev.on('connection.update', async (update) => {
@@ -140,25 +142,35 @@ sock.ev.on('connection.update', async (update) => {
     } catch (err) {
       console.error('FETCH_ERROR:' + err.message);
     } finally {
+      done = true;
       clearTimeout(timeout);
       sock.end(undefined);
       db.close();
       process.exit(0);
     }
   } else if (update.connection === 'close') {
-    clearTimeout(timeout);
-    console.error('CONNECTION_CLOSED');
-    process.exit(1);
+    if (!done) {
+      clearTimeout(timeout);
+      console.error('CONNECTION_CLOSED');
+      process.exit(1);
+    }
   }
 });
 `;
 
-    const output = execSync(`node --input-type=module -e ${JSON.stringify(syncScript)}`, {
-      cwd: projectRoot,
-      encoding: 'utf-8',
-      timeout: 45000,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    const tmpFile = path.join(projectRoot, `nanoclaw-sync-groups-${Date.now()}.mjs`);
+    fs.writeFileSync(tmpFile, syncScript, 'utf-8');
+    let output: string;
+    try {
+      output = execSync(`node ${tmpFile}`, {
+        cwd: projectRoot,
+        encoding: 'utf-8',
+        timeout: 45000,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+    } finally {
+      fs.rmSync(tmpFile, { force: true });
+    }
     syncOk = output.includes('SYNCED:');
     logger.info({ output: output.trim() }, 'Sync output');
   } catch (err) {
