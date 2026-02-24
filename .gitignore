@@ -12,12 +12,30 @@ logs/
 # Groups - never track group memory (contains personal data)
 groups/
 
-# Secrets
-*.keys.json
+# Secrets & credentials
 .env
+.env.*
+!.env.example
+*.keys.json
+*.key
+*.pem
+creds.json
+
+# Databases & loose logs anywhere in the tree
+*.db
+*.sqlite
+*.log
+
+# Runtime-generated files (service setup writes these to project root)
+nanoclaw.pid
+start-nanoclaw.sh
+setup.log
 
 # OS
 .DS_Store
+Thumbs.db
+*.swp
+*.swo
 
 # IDE
 .idea/
@@ -25,5 +43,11 @@ groups/
 
 # Skills system (local per-installation state)
 .nanoclaw/
+
+# Claude Code session data (.claude/skills/ is intentionally tracked)
+.claude/projects/
+.claude/settings.json
+.claude/settings.local.json
+.claude/todos/
 
 agents-sdk-docs
