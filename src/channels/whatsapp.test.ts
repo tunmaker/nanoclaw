@@ -6,6 +6,7 @@ import { EventEmitter } from 'events';
 // Mock config
 vi.mock('../config.js', () => ({
   STORE_DIR: '/tmp/nanoclaw-test-store',
+  MEDIA_DIR: '/tmp/nanoclaw-test-media',
   ASSISTANT_NAME: 'Andy',
   ASSISTANT_HAS_OWN_NUMBER: false,
 }));
@@ -21,6 +22,10 @@ vi.mock('../logger.js', () => ({
 }));
 
 // Mock db
+vi.mock('../env.js', () => ({
+  readEnvFile: vi.fn(() => ({})),
+}));
+
 vi.mock('../db.js', () => ({
   getLastGroupSync: vi.fn(() => null),
   setLastGroupSync: vi.fn(),
@@ -84,6 +89,7 @@ vi.mock('@whiskeysockets/baileys', () => {
       timedOut: 408,
       restartRequired: 515,
     },
+    downloadMediaMessage: vi.fn().mockResolvedValue(Buffer.from('fake-media')),
     fetchLatestWaWebVersion: vi.fn().mockResolvedValue({ version: [2, 3000, 0] }),
     makeCacheableSignalKeyStore: vi.fn((keys: unknown) => keys),
     useMultiFileAuthState: vi.fn().mockResolvedValue({

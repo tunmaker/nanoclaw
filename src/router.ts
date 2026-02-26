@@ -1,4 +1,4 @@
-import { Channel, NewMessage } from './types.js';
+import { Channel, MediaAttachment, NewMessage } from './types.js';
 
 export function escapeXml(s: string): string {
   if (!s) return '';
@@ -9,10 +9,21 @@ export function escapeXml(s: string): string {
     .replace(/"/g, '&quot;');
 }
 
+function formatMediaTags(media: MediaAttachment[]): string {
+  return media.map((m) => {
+    const attrs: string[] = [`type="${escapeXml(m.type)}"`, `path="${escapeXml(m.containerPath)}"`];
+    if (m.caption) attrs.push(`caption="${escapeXml(m.caption)}"`);
+    if (m.transcript) attrs.push(`transcript="${escapeXml(m.transcript)}"`);
+    if (m.fileName) attrs.push(`filename="${escapeXml(m.fileName)}"`);
+    return `<media ${attrs.join(' ')}/>`;
+  }).join('\n  ');
+}
+
 export function formatMessages(messages: NewMessage[]): string {
-  const lines = messages.map((m) =>
-    `<message sender="${escapeXml(m.sender_name)}" time="${m.timestamp}">${escapeXml(m.content)}</message>`,
-  );
+  const lines = messages.map((m) => {
+    const mediaXml = m.media?.length ? `\n  ${formatMediaTags(m.media)}` : '';
+    return `<message sender="${escapeXml(m.sender_name)}" time="${m.timestamp}">${escapeXml(m.content)}${mediaXml}</message>`;
+  });
   return `<messages>\n${lines.join('\n')}\n</messages>`;
 }
 

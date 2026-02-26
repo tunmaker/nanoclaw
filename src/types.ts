@@ -41,6 +41,16 @@ export interface RegisteredGroup {
   requiresTrigger?: boolean; // Default: true for groups, false for solo chats
 }
 
+export interface MediaAttachment {
+  type: 'image' | 'video' | 'audio' | 'voice' | 'document' | 'sticker';
+  filePath: string;        // absolute host path
+  containerPath: string;   // path inside container
+  mimeType: string;
+  fileName?: string;       // original filename for documents
+  transcript?: string;     // voice note transcript (Whisper)
+  caption?: string;        // image/video caption
+}
+
 export interface NewMessage {
   id: string;
   chat_jid: string;
@@ -50,6 +60,7 @@ export interface NewMessage {
   timestamp: string;
   is_from_me?: boolean;
   is_bot_message?: boolean;
+  media?: MediaAttachment[];
 }
 
 export interface ScheduledTask {
