@@ -1,19 +1,17 @@
 # Intent: src/channels/whatsapp.test.ts modifications
 
 ## What changed
-Added mock for the transcription module and 3 new test cases for voice message handling.
+Added mocks for new dependencies (env, media download) and updated voice note test to verify media handling.
 
 ## Key sections
 
 ### Mocks (top of file)
-- Added: `vi.mock('../transcription.js', ...)` with `isVoiceMessage` and `transcribeAudioMessage` mocks
-- Added: `import { transcribeAudioMessage } from '../transcription.js'` for test assertions
+- Added: `MEDIA_DIR` to config mock
+- Added: `vi.mock('../env.js', ...)` with `readEnvFile` returning empty object
+- Added: `downloadMediaMessage` mock to Baileys mock returning `Buffer.from('fake-media')`
 
-### Test cases (inside "message handling" describe block)
-- Changed: "handles message with no extractable text (e.g. voice note without caption)" → "transcribes voice messages"
-  - Now expects `[Voice: Hello this is a voice message]` instead of empty content
-- Added: "falls back when transcription returns null" — expects `[Voice Message - transcription unavailable]`
-- Added: "falls back when transcription throws" — expects `[Voice Message - transcription failed]`
+### Test cases
+- Existing "handles message with no extractable text (e.g. voice note without caption)" test now covers media download path
 
 ## Invariants (must-keep)
 - All existing test cases for text, extendedTextMessage, imageMessage, videoMessage unchanged
@@ -22,5 +20,5 @@ Added mock for the transcription module and 3 new test cases for voice message h
 - All outgoing queue tests unchanged
 - All group metadata sync tests unchanged
 - All ownsJid and setTyping tests unchanged
-- All existing mocks (config, logger, db, fs, child_process, baileys) unchanged
+- All existing mocks (config, logger, db, fs, child_process, baileys) preserved
 - Test helpers (createTestOpts, triggerConnection, triggerDisconnect, triggerMessages, connectChannel) unchanged

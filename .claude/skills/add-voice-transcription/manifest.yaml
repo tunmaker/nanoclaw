@@ -1,17 +1,24 @@
 skill: voice-transcription
-version: 1.0.0
-description: "Voice message transcription via OpenAI Whisper"
+version: 2.0.0
+description: "Voice message transcription via local whisper.cpp server + full media handling"
 core_version: 0.1.0
-adds:
-  - src/transcription.ts
 modifies:
+  - src/types.ts
+  - src/config.ts
   - src/channels/whatsapp.ts
   - src/channels/whatsapp.test.ts
+  - src/db.ts
+  - src/router.ts
+  - src/container-runner.ts
+  - src/container-runner.test.ts
+  - container/Dockerfile
 structured:
-  npm_dependencies:
-    openai: "^4.77.0"
   env_additions:
-    - OPENAI_API_KEY
+    - WHISPER_SERVER_URL
+  external_dependencies:
+    - name: whisper.cpp
+      url: https://github.com/ggerganov/whisper.cpp
+      description: "Local speech-to-text server (must be running on port 8178)"
 conflicts: []
 depends: []
-test: "npx vitest run src/channels/whatsapp.test.ts"
+test: "npx vitest run src/channels/whatsapp.test.ts src/container-runner.test.ts"

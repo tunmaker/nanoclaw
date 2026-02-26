@@ -1,140 +1,183 @@
 ---
 name: add-voice-transcription
-description: Add voice message transcription to NanoClaw using OpenAI's Whisper API. Automatically transcribes WhatsApp voice notes so the agent can read and respond to them.
+description: Add voice message transcription to NanoClaw using a local whisper.cpp server. Automatically transcribes WhatsApp voice notes so the agent can read and respond to them. Also adds full media handling (images, video, audio, documents, stickers).
 ---
 
-# Add Voice Transcription
+# Add Voice Transcription (whisper.cpp)
 
-This skill adds automatic voice message transcription to NanoClaw's WhatsApp channel using OpenAI's Whisper API. When a voice note arrives, it is downloaded, transcribed, and delivered to the agent as `[Voice: <transcript>]`.
+This skill adds automatic voice message transcription to NanoClaw using a local whisper.cpp server. It also adds full media handling — downloading and mounting all media types (images, video, audio, documents, stickers) so the agent can access them inside containers.
+
+When a voice note arrives, it is downloaded, transcribed via the local whisper.cpp HTTP server, and delivered to the agent as `[Voice message] <transcript>`.
+
+## Prerequisites
+
+- whisper.cpp compiled and running as an HTTP server
+- A Whisper model downloaded (e.g., `ggml-base.bin` or `ggml-small.bin`)
 
 ## Phase 1: Pre-flight
 
 ### Check if already applied
 
-Read `.nanoclaw/state.yaml`. If `voice-transcription` is in `applied_skills`, skip to Phase 3 (Configure). The code changes are already in place.
+Check if `src/channels/whatsapp.ts` already contains `transcribeAudio`. If so, skip to Phase 3 (Configure).
 
-### Ask the user
-
-Use `AskUserQuestion` to collect information:
-
-AskUserQuestion: Do you have an OpenAI API key for Whisper transcription?
-
-If yes, collect it now. If no, direct them to create one at https://platform.openai.com/api-keys.
-
-## Phase 2: Apply Code Changes
-
-Run the skills engine to apply this skill's code package.
-
-### Initialize skills system (if needed)
-
-If `.nanoclaw/` directory doesn't exist yet:
+### Check whisper.cpp status
 
 ```bash
-npx tsx scripts/apply-skill.ts --init
+curl -s http://127.0.0.1:8178/inference -F "file=@/dev/null" -F "response_format=text"
 ```
 
-### Apply the skill
+If the server responds (even with an error about the file), it's running. If connection refused, proceed to Phase 2 for setup instructions.
+
+## Phase 2: Set Up whisper.cpp
+
+### Build whisper.cpp
 
 ```bash
-npx tsx scripts/apply-skill.ts .claude/skills/add-voice-transcription
+git clone https://github.com/ggerganov/whisper.cpp.git
+cd whisper.cpp
+cmake -B build
+cmake --build build --config Release
 ```
 
-This deterministically:
-- Adds `src/transcription.ts` (voice transcription module using OpenAI Whisper)
-- Three-way merges voice handling into `src/channels/whatsapp.ts` (isVoiceMessage check, transcribeAudioMessage call)
-- Three-way merges transcription tests into `src/channels/whatsapp.test.ts` (mock + 3 test cases)
-- Installs the `openai` npm dependency
-- Updates `.env.example` with `OPENAI_API_KEY`
-- Records the application in `.nanoclaw/state.yaml`
-
-If the apply reports merge conflicts, read the intent files:
-- `modify/src/channels/whatsapp.ts.intent.md` — what changed and invariants for whatsapp.ts
-- `modify/src/channels/whatsapp.test.ts.intent.md` — what changed for whatsapp.test.ts
-
-### Validate code changes
+### Download a model
 
 ```bash
-npm test
+./models/download-ggml-model.sh base
+# Or for better accuracy: ./models/download-ggml-model.sh small
+```
+
+### Start the server
+
+```bash
+./build/bin/whisper-server -m models/ggml-base.bin --port 8178
+```
+
+For persistent operation, create a systemd service:
+
+```ini
+[Unit]
+Description=Whisper.cpp Server
+After=network.target
+
+[Service]
+ExecStart=/path/to/whisper.cpp/build/bin/whisper-server -m /path/to/whisper.cpp/models/ggml-base.bin --port 8178
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+```
+
+Save to `~/.config/systemd/user/whisper.service`, then:
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now whisper
+```
+
+## Phase 3: Apply Code Changes
+
+The following changes are needed across these files:
+
+### `src/types.ts`
+Add `MediaAttachment` interface and `media` field to `NewMessage`:
+
+```typescript
+export interface MediaAttachment {
+  type: 'image' | 'video' | 'audio' | 'voice' | 'document' | 'sticker';
+  filePath: string;        // absolute host path
+  containerPath: string;   // path inside container
+  mimeType: string;
+  fileName?: string;       // original filename for documents
+  transcript?: string;     // voice note transcript (Whisper)
+  caption?: string;        // image/video caption
+}
+```
+
+### `src/config.ts`
+Add `MEDIA_DIR` export:
+```typescript
+export const MEDIA_DIR = path.resolve(PROJECT_ROOT, 'store', 'media');
+```
+
+### `src/channels/whatsapp.ts`
+- Add mime-to-extension mapping, `detectMediaInfo()`, and `transcribeAudio()` functions
+- Import `downloadMediaMessage` from Baileys, `MEDIA_DIR` from config, `readEnvFile` from env
+- In the `messages.upsert` handler: download media, transcribe voice notes, attach media to messages
+- `transcribeAudio()` sends the audio file to the whisper.cpp server via multipart form POST
+
+### `src/db.ts`
+- Add `media_json` column migration
+- Store/retrieve media as JSON in messages table
+- Add `parseMediaFromRow()` helper
+
+### `src/router.ts`
+- Add `formatMediaTags()` to render media as XML tags in agent messages
+- Include media tags in `formatMessages()` output
+
+### `src/container-runner.ts`
+- Mount group media directory read-only at `/workspace/group/media`
+
+### `container/Dockerfile`
+- Add `ffmpeg` to container packages (needed for audio format conversion)
+
+### Validate
+
+```bash
 npm run build
+npx vitest run src/channels/whatsapp.test.ts src/container-runner.test.ts
 ```
 
-All tests must pass (including the 3 new voice transcription tests) and build must be clean before proceeding.
+## Phase 4: Configure
 
-## Phase 3: Configure
+### Set whisper server URL (optional)
 
-### Get OpenAI API key (if needed)
-
-If the user doesn't have an API key:
-
-> I need you to create an OpenAI API key:
->
-> 1. Go to https://platform.openai.com/api-keys
-> 2. Click "Create new secret key"
-> 3. Give it a name (e.g., "NanoClaw Transcription")
-> 4. Copy the key (starts with `sk-`)
->
-> Cost: ~$0.006 per minute of audio (~$0.003 per typical 30-second voice note)
-
-Wait for the user to provide the key.
-
-### Add to environment
-
-Add to `.env`:
+If the whisper.cpp server is not at the default `http://127.0.0.1:8178`, add to `.env`:
 
 ```bash
-OPENAI_API_KEY=<their-key>
+WHISPER_SERVER_URL=http://your-host:port
 ```
-
-Sync to container environment:
-
-```bash
-mkdir -p data/env && cp .env data/env/env
-```
-
-The container reads environment from `data/env/env`, not `.env` directly.
 
 ### Build and restart
 
 ```bash
 npm run build
-launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # macOS
-# Linux: systemctl --user restart nanoclaw
+# macOS:
+launchctl kickstart -k gui/$(id -u)/com.nanoclaw
+# Linux:
+systemctl --user restart nanoclaw
 ```
 
-## Phase 4: Verify
+## Phase 5: Verify
 
 ### Test with a voice note
 
-Tell the user:
-
-> Send a voice note in any registered WhatsApp chat. The agent should receive it as `[Voice: <transcript>]` and respond to its content.
+Send a voice note in any registered WhatsApp chat. The agent should receive it with the transcript and respond to its content.
 
 ### Check logs if needed
 
 ```bash
-tail -f logs/nanoclaw.log | grep -i voice
+tail -f logs/nanoclaw.log | grep -iE 'transcri|whisper|voice|media'
 ```
 
 Look for:
-- `Transcribed voice message` — successful transcription with character count
-- `OPENAI_API_KEY not set` — key missing from `.env`
-- `OpenAI transcription failed` — API error (check key validity, billing)
-- `Failed to download audio message` — media download issue
+- `Media downloaded` — media file saved successfully
+- `Whisper server returned error` — server responded but couldn't process the file
+- `Failed to transcribe audio with whisper-server` — connection error (server down?)
 
 ## Troubleshooting
 
-### Voice notes show "[Voice Message - transcription unavailable]"
+### Voice notes not transcribed
 
-1. Check `OPENAI_API_KEY` is set in `.env` AND synced to `data/env/env`
-2. Verify key works: `curl -s https://api.openai.com/v1/models -H "Authorization: Bearer $OPENAI_API_KEY" | head -c 200`
-3. Check OpenAI billing — Whisper requires a funded account
+1. Check whisper.cpp server is running: `curl http://127.0.0.1:8178/inference -F "file=@test.ogg" -F "response_format=text"`
+2. Check `WHISPER_SERVER_URL` in `.env` if using a non-default address
+3. Check NanoClaw logs for whisper errors
 
-### Voice notes show "[Voice Message - transcription failed]"
+### Media not accessible in container
 
-Check logs for the specific error. Common causes:
-- Network timeout — transient, will work on next message
-- Invalid API key — regenerate at https://platform.openai.com/api-keys
-- Rate limiting — wait and retry
+1. Verify `store/media/<group-folder>/` exists and contains files
+2. Check container logs for mount errors
+3. Media is mounted read-only at `/workspace/group/media/` inside containers
 
 ### Agent doesn't respond to voice notes
 

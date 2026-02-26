@@ -6,21 +6,101 @@ import makeWASocket, {
   Browsers,
   DisconnectReason,
   WASocket,
+  WAMessage,
+  downloadMediaMessage,
+  fetchLatestWaWebVersion,
   makeCacheableSignalKeyStore,
   useMultiFileAuthState,
 } from '@whiskeysockets/baileys';
-
-import { ASSISTANT_HAS_OWN_NUMBER, ASSISTANT_NAME, STORE_DIR } from '../config.js';
+import { ASSISTANT_HAS_OWN_NUMBER, ASSISTANT_NAME, MEDIA_DIR, STORE_DIR } from '../config.js';
+import { readEnvFile } from '../env.js';
 import {
   getLastGroupSync,
   setLastGroupSync,
   updateChatName,
 } from '../db.js';
 import { logger } from '../logger.js';
-import { isVoiceMessage, transcribeAudioMessage } from '../transcription.js';
-import { Channel, OnInboundMessage, OnChatMetadata, RegisteredGroup } from '../types.js';
+import { Channel, MediaAttachment, OnInboundMessage, OnChatMetadata, RegisteredGroup } from '../types.js';
 
 const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+// Mime type to file extension mapping
+const MIME_TO_EXT: Record<string, string> = {
+  'image/jpeg': '.jpg',
+  'image/png': '.png',
+  'image/webp': '.webp',
+  'image/gif': '.gif',
+  'video/mp4': '.mp4',
+  'video/3gpp': '.3gp',
+  'audio/ogg; codecs=opus': '.ogg',
+  'audio/ogg': '.ogg',
+  'audio/mpeg': '.mp3',
+  'audio/mp4': '.m4a',
+  'application/pdf': '.pdf',
+};
+
+function getExtFromMime(mimeType: string): string {
+  return MIME_TO_EXT[mimeType] || `.${mimeType.split('/')[1]?.split(';')[0] || 'bin'}`;
+}
+
+/** Detect media type from a Baileys message */
+function detectMediaInfo(msg: WAMessage): {
+  type: MediaAttachment['type'];
+  mimeType: string;
+  caption?: string;
+  fileName?: string;
+  isPtt: boolean;
+} | null {
+  const m = msg.message;
+  if (!m) return null;
+
+  if (m.imageMessage) {
+    return { type: 'image', mimeType: m.imageMessage.mimetype || 'image/jpeg', caption: m.imageMessage.caption || undefined, isPtt: false };
+  }
+  if (m.videoMessage) {
+    return { type: 'video', mimeType: m.videoMessage.mimetype || 'video/mp4', caption: m.videoMessage.caption || undefined, isPtt: false };
+  }
+  if (m.audioMessage) {
+    const isPtt = m.audioMessage.ptt === true;
+    return { type: isPtt ? 'voice' : 'audio', mimeType: m.audioMessage.mimetype || 'audio/ogg; codecs=opus', isPtt };
+  }
+  if (m.documentMessage) {
+    return { type: 'document', mimeType: m.documentMessage.mimetype || 'application/octet-stream', fileName: m.documentMessage.fileName || undefined, isPtt: false };
+  }
+  if (m.stickerMessage) {
+    return { type: 'sticker', mimeType: m.stickerMessage.mimetype || 'image/webp', isPtt: false };
+  }
+  return null;
+}
+
+const WHISPER_SERVER_URL = readEnvFile(['WHISPER_SERVER_URL']).WHISPER_SERVER_URL || 'http://127.0.0.1:8178';
+
+/** Transcribe an audio file using local whisper.cpp server */
+async function transcribeAudio(filePath: string): Promise<string | undefined> {
+  try {
+    const fileBuffer = fs.readFileSync(filePath);
+    const blob = new Blob([fileBuffer]);
+    const formData = new FormData();
+    formData.append('file', blob, path.basename(filePath));
+    formData.append('response_format', 'text');
+
+    const response = await fetch(`${WHISPER_SERVER_URL}/inference`, {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!response.ok) {
+      logger.error({ status: response.status, filePath }, 'Whisper server returned error');
+      return undefined;
+    }
+
+    const text = await response.text();
+    return text.trim() || undefined;
+  } catch (err) {
+    logger.error({ err, filePath }, 'Failed to transcribe audio with whisper-server');
+    return undefined;
+  }
+}
 
 export interface WhatsAppChannelOpts {
   onMessage: OnInboundMessage;
@@ -56,7 +136,12 @@ export class WhatsAppChannel implements Channel {
 
     const { state, saveCreds } = await useMultiFileAuthState(authDir);
 
+    const { version } = await fetchLatestWaWebVersion({}).catch((err) => {
+      logger.warn({ err }, 'Failed to fetch latest WA Web version, using default');
+      return { version: undefined };
+    });
     this.sock = makeWASocket({
+      version,
       auth: {
         creds: state.creds,
         keys: makeCacheableSignalKeyStore(state.keys, logger),
@@ -81,7 +166,7 @@ export class WhatsAppChannel implements Channel {
 
       if (connection === 'close') {
         this.connected = false;
-        const reason = (lastDisconnect?.error as any)?.output?.statusCode;
+        const reason = (lastDisconnect?.error as { output?: { statusCode?: number } })?.output?.statusCode;
         const shouldReconnect = reason !== DisconnectReason.loggedOut;
         logger.info({ reason, shouldReconnect, queuedMessages: this.outgoingQueue.length }, 'Connection closed');
 
@@ -104,7 +189,9 @@ export class WhatsAppChannel implements Channel {
         logger.info('Connected to WhatsApp');
 
         // Announce availability so WhatsApp relays subsequent presence updates (typing indicators)
-        this.sock.sendPresenceUpdate('available').catch(() => {});
+        this.sock.sendPresenceUpdate('available').catch((err) => {
+          logger.warn({ err }, 'Failed to send presence update');
+        });
 
         // Build LID to phone mapping from auth state for self-chat translation
         if (this.sock.user) {
@@ -165,12 +252,78 @@ export class WhatsAppChannel implements Channel {
         // Only deliver full message for registered groups
         const groups = this.opts.registeredGroups();
         if (groups[chatJid]) {
-          const content =
+          const group = groups[chatJid];
+
+          // Extract text content
+          let content =
             msg.message?.conversation ||
             msg.message?.extendedTextMessage?.text ||
             msg.message?.imageMessage?.caption ||
             msg.message?.videoMessage?.caption ||
             '';
+
+          // Download media if present
+          let media: MediaAttachment[] | undefined;
+          const mediaInfo = detectMediaInfo(msg);
+          if (mediaInfo) {
+            try {
+              const buffer = await downloadMediaMessage(msg, 'buffer', {});
+              const ext = mediaInfo.fileName
+                ? path.extname(mediaInfo.fileName)
+                : getExtFromMime(mediaInfo.mimeType);
+              const fileName = `${Date.now()}-${msg.key.id || 'unknown'}${ext}`;
+              const groupMediaDir = path.join(MEDIA_DIR, group.folder);
+              fs.mkdirSync(groupMediaDir, { recursive: true });
+              const filePath = path.join(groupMediaDir, fileName);
+              fs.writeFileSync(filePath, buffer as Buffer);
+
+              const containerPath = `/workspace/group/media/${fileName}`;
+
+              const attachment: MediaAttachment = {
+                type: mediaInfo.type,
+                filePath,
+                containerPath,
+                mimeType: mediaInfo.mimeType,
+              };
+
+              if (mediaInfo.caption) attachment.caption = mediaInfo.caption;
+              if (mediaInfo.fileName) attachment.fileName = mediaInfo.fileName;
+
+              // Transcribe voice notes
+              if (mediaInfo.type === 'voice') {
+                const transcript = await transcribeAudio(filePath);
+                if (transcript) {
+                  attachment.transcript = transcript;
+                  // Use transcript as content so message isn't filtered as empty
+                  if (!content) content = `[Voice message] ${transcript}`;
+                }
+              }
+
+              // For media without text, set a descriptive content
+              if (!content) {
+                if (mediaInfo.type === 'document' && mediaInfo.fileName) {
+                  content = `[Document: ${mediaInfo.fileName}]`;
+                } else if (mediaInfo.type === 'sticker') {
+                  content = '[Sticker]';
+                } else {
+                  content = `[${mediaInfo.type.charAt(0).toUpperCase() + mediaInfo.type.slice(1)}]`;
+                }
+              }
+
+              media = [attachment];
+              logger.info(
+                { group: group.name, type: mediaInfo.type, fileName },
+                'Media downloaded',
+              );
+            } catch (err) {
+              logger.error({ err, group: group.name, type: mediaInfo.type }, 'Failed to download media');
+              // Still process the message with whatever text content exists
+              if (!content) continue;
+            }
+          }
+
+          // Skip protocol messages with no text content (encryption keys, read receipts, etc.)
+          if (!content) continue;
 
           const sender = msg.key.participant || msg.key.remoteJid || '';
           const senderName = msg.pushName || sender.split('@')[0];
@@ -184,32 +337,16 @@ export class WhatsAppChannel implements Channel {
             ? fromMe
             : content.startsWith(`${ASSISTANT_NAME}:`);
 
-          // Transcribe voice messages before storing
-          let finalContent = content;
-          if (isVoiceMessage(msg)) {
-            try {
-              const transcript = await transcribeAudioMessage(msg, this.sock);
-              if (transcript) {
-                finalContent = `[Voice: ${transcript}]`;
-                logger.info({ chatJid, length: transcript.length }, 'Transcribed voice message');
-              } else {
-                finalContent = '[Voice Message - transcription unavailable]';
-              }
-            } catch (err) {
-              logger.error({ err }, 'Voice transcription error');
-              finalContent = '[Voice Message - transcription failed]';
-            }
-          }
-
           this.opts.onMessage(chatJid, {
             id: msg.key.id || '',
             chat_jid: chatJid,
             sender,
             sender_name: senderName,
-            content: finalContent,
+            content,
             timestamp,
             is_from_me: fromMe,
             is_bot_message: isBotMessage,
+            media,
           });
         }
       }
