@@ -1,0 +1,80 @@
+# Routing rules — evaluated in priority order (lowest number wins).
+# target: local | claude
+rules:
+  - name: sensitive_content
+    priority: 1
+    target: local
+    reason: "sensitive personal content"
+    patterns:
+      - type: keyword
+        values:
+          - "my wife"
+          - "my husband"
+          - "my partner"
+          - "my child"
+          - "my kids"
+          - "my family"
+          - "my address"
+          - "my phone"
+          - "my password"
+          - "my secret"
+          - "my ssn"
+          - "my social security"
+          - "my credit card"
+          - "my bank"
+      - type: regex
+        # API keys, tokens, secrets in-line
+        value: "(?i)(password|passwd|api[_\\s-]?key|secret[_\\s-]?key|access[_\\s-]?token|bearer\\s+[\\w\\-]+)"
+
+  - name: coding_task
+    priority: 2
+    target: claude
+    reason: "coding or debugging task"
+    patterns:
+      - type: keyword
+        values:
+          - "write a function"
+          - "write a script"
+          - "write a program"
+          - "implement"
+          - "debug"
+          - "refactor"
+          - "unit test"
+          - "binary search"
+          - "algorithm"
+          - "class definition"
+          - "async def"
+          - "def "
+          - "import "
+          - "dockerfile"
+          - "sql query"
+          - "regex pattern"
+          - "fix this code"
+          - "code review"
+      - type: regex
+        # Fenced code blocks
+        value: "```[a-zA-Z]*\\n"
+
+  - name: realtime_info
+    priority: 3
+    target: local
+    reason: "real-time or current information needed"
+    patterns:
+      - type: keyword
+        values:
+          - "what's the current"
+          - "latest news"
+          - "today's"
+          - "right now"
+          - "current price"
+          - "live score"
+          - "weather"
+          - "breaking news"
+          - "stock price"
+          - "who is the current"
+
+  - name: default
+    priority: 999
+    target: local
+    reason: "default privacy-first routing"
+    patterns: []

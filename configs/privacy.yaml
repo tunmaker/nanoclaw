@@ -1,0 +1,54 @@
+# Privacy filtering rules — configurable sensitive-data patterns.
+# Each entry has:
+#   name:    human-readable label
+#   regex:   Python-compatible regex
+#   label:   replacement token inserted in sanitized text
+
+privacy_mode: false   # set true to block ALL external API calls
+
+patterns:
+  # More-specific sk- patterns must come before the generic one
+  - name: anthropic_api_key
+    regex: 'sk-ant-[A-Za-z0-9\-_]{20,}'
+    label: "[ANTHROPIC_KEY]"
+
+  - name: openai_api_key
+    regex: 'sk-[A-Za-z0-9]{48}'
+    label: "[OPENAI_KEY]"
+
+  - name: api_key_generic
+    regex: '(?i)\b(sk-[A-Za-z0-9\-_]{20,}|[A-Za-z0-9]{32,64}(?=\s|$))'
+    label: "[API_KEY]"
+
+  - name: aws_access_key
+    regex: '(?i)(AKIA[0-9A-Z]{16})'
+    label: "[AWS_KEY]"
+
+  - name: password_in_text
+    regex: '(?i)(password|passwd|pwd)\s*[=:]\s*\S+'
+    label: "[PASSWORD]"
+
+  - name: credit_card
+    # Matches 13-19 digit sequences that pass basic Luhn structure (groups of 4)
+    regex: '\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13}|6(?:011|5[0-9]{2})[0-9]{12}|(?:2131|1800|35\d{3})\d{11})\b'
+    label: "[CREDIT_CARD]"
+
+  - name: ssh_private_key
+    regex: '-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----'
+    label: "[SSH_PRIVATE_KEY]"
+
+  - name: phone_number_us
+    regex: '(?<!\d)(?:\+?1[\s.\-]?)?(?:\(?\d{3}\)?[\s.\-]?)?\d{3}[\s.\-]\d{4}(?!\d)'
+    label: "[PHONE]"
+
+  - name: national_id_ssn
+    regex: '\b\d{3}[-\s]\d{2}[-\s]\d{4}\b'
+    label: "[SSN]"
+
+  - name: jwt_token
+    regex: 'ey[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+'
+    label: "[JWT_TOKEN]"
+
+  - name: bearer_token
+    regex: '(?i)bearer\s+[A-Za-z0-9\-_\.~\+\/]+=*'
+    label: "[BEARER_TOKEN]"
