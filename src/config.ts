@@ -68,3 +68,9 @@ export const TRIGGER_PATTERN = new RegExp(
 // Uses system timezone by default
 export const TIMEZONE =
   process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+// Routing + privacy config paths
+export const ROUTING_CONFIG_PATH = path.join(PROJECT_ROOT, 'configs/routing.yaml');
+export const PRIVACY_CONFIG_PATH = path.join(PROJECT_ROOT, 'configs/privacy.yaml');
+export const LOCAL_LLM_URL = process.env.LOCAL_LLM_URL ?? 'http://localhost:8080/v1';
+export const LOGS_DIR = path.join(PROJECT_ROOT, 'logs');
