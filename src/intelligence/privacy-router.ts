@@ -10,7 +10,7 @@
 import fs from 'fs';
 import path from 'path';
 
-import { LOGS_DIR, PRIVACY_CONFIG_PATH } from '../core/config.js';
+import { LOGS_DIR, PRIVACY_CONFIG_PATH, ROUTE_BYPASS_LOCAL } from '../core/config.js';
 import { PrivacyFilter } from '../core/privacy.js';
 import { callLocalLlm } from '../core/local-llm.js';
 
@@ -31,16 +31,27 @@ export interface RoutingDecision {
 // ---------------------------------------------------------------------------
 
 const CLASSIFY_PROMPT = (msg: string): string =>
-  `Classify this message. Reply with exactly one word.
+  `You are a privacy classifier. Classify the group chat message below.
+Reply with exactly one word: PRIVATE, TECHNICAL, or MIXED.
 
-PRIVATE   = greetings, casual chat, questions about personal life, health, finances, passwords, home address, private relationships
-TECHNICAL = code, debugging, architecture, system design, research, factual questions, general knowledge
-MIXED     = contains BOTH a technical question AND sensitive personal details (e.g. "debug my code, my password is X")
+PRIVATE   = greetings, social chat, casual conversation, personal life, health, finances, private relationships
+TECHNICAL = code, debugging, architecture, system design, research, factual questions — with no sensitive personal context
+MIXED     = ONLY when the SAME message contains BOTH a specific technical question AND sensitive personal details
 
-Note: sender display names in group chats are NOT personal information.
-When in doubt between PRIVATE and TECHNICAL, prefer PRIVATE.
+Rules:
+- The input is XML-formatted chat history. Sender names, @mentions, and XML tags are metadata — NOT personal information.
+- Greetings and social messages are PRIVATE even if they @mention someone or address a group.
+- Choose MIXED only when both a technical question AND sensitive personal details are clearly present.
+- When in doubt, choose PRIVATE.
 
-Message: "${msg}"
+Examples:
+  "@Person2 hello"               → PRIVATE
+  "good morning everyone"        → PRIVATE
+  "how do I fix a React bug?"    → TECHNICAL
+  "fix my code, password is abc" → MIXED
+
+Message:
+${msg}
 
 Classification:`;
 
@@ -146,8 +157,9 @@ export async function classifyAndRoute(
     10,
   );
   const label = classifyResponse.trim().toUpperCase().split(/\s+/)[0] ?? '';
+  // Privacy-first fallback: anything that isn't explicitly TECHNICAL or MIXED routes local.
   const sensitivity: Sensitivity =
-    label === 'PRIVATE' ? 'private' : label === 'MIXED' ? 'mixed' : 'technical';
+    label === 'TECHNICAL' ? 'technical' : label === 'MIXED' ? 'mixed' : 'private';
 
   // Step 3: Route
   if (sensitivity === 'private') {
@@ -164,10 +176,25 @@ export async function classifyAndRoute(
 
   if (sensitivity === 'technical') {
     const decision: RoutingDecision = {
-      route: 'claude',
+      route: ROUTE_BYPASS_LOCAL ? 'local' : 'claude',
       sensitivity: 'technical',
       sanitized: false,
-      reason: 'LLM classified as TECHNICAL',
+      reason: ROUTE_BYPASS_LOCAL
+        ? '[bypass] LLM classified as TECHNICAL — route forced to local'
+        : 'LLM classified as TECHNICAL',
+      detectedPatterns: [],
+    };
+    writeAuditLog(decision);
+    return decision;
+  }
+
+  // MIXED: if bypassing, skip sanitization (no point sanitizing for a local route)
+  if (ROUTE_BYPASS_LOCAL) {
+    const decision: RoutingDecision = {
+      route: 'local',
+      sensitivity: 'mixed',
+      sanitized: false,
+      reason: '[bypass] LLM classified as MIXED — route forced to local, sanitization skipped',
       detectedPatterns: [],
     };
     writeAuditLog(decision);

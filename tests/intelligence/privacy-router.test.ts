@@ -34,6 +34,7 @@ vi.mock('fs', async () => {
 vi.mock('../../src/core/config.js', () => ({
   LOGS_DIR: '/tmp/test-logs',
   PRIVACY_CONFIG_PATH: '/tmp/privacy.yaml',
+  ROUTE_BYPASS_LOCAL: false,
 }));
 
 import { callLocalLlm } from '../../src/core/local-llm.js';
@@ -108,13 +109,53 @@ describe('classifyAndRoute', () => {
     expect(mockLlm).toHaveBeenCalledTimes(2);
   });
 
-  it('LLM returns unexpected label → defaults to technical routing', async () => {
+  it('LLM returns unexpected label → privacy-first fallback to local', async () => {
     mockLlm.mockResolvedValueOnce('UNKNOWN_LABEL');
 
     const result = await classifyAndRoute('Something unusual');
 
+    // Unknown label must NOT escalate to Claude — route locally for safety
+    expect(result.route).toBe('local');
+    expect(result.sensitivity).toBe('private');
+    expect(result.sanitized).toBe(false);
+  });
+
+  it('greeting with @mention (XML-formatted) → PRIVATE, route local', async () => {
+    mockLlm.mockResolvedValueOnce('PRIVATE');
+
+    const result = await classifyAndRoute(
+      '<messages>\n<message sender="Person1" time="2026-03-01T15:55:53.000Z">@Person2 hello</message>\n</messages>',
+    );
+
+    expect(result.route).toBe('local');
+    expect(result.sensitivity).toBe('private');
+    expect(result.sanitized).toBe(false);
+    expect(mockLlm).toHaveBeenCalledTimes(1);
+  });
+
+  it('social message with group address (XML-formatted) → PRIVATE, route local', async () => {
+    mockLlm.mockResolvedValueOnce('PRIVATE');
+
+    const result = await classifyAndRoute(
+      '<messages>\n<message sender="Person1" time="2026-03-01T15:55:53.000Z">good morning everyone!</message>\n</messages>',
+    );
+
+    expect(result.route).toBe('local');
+    expect(result.sensitivity).toBe('private');
+    expect(result.sanitized).toBe(false);
+    expect(mockLlm).toHaveBeenCalledTimes(1);
+  });
+
+  it('technical question in XML format → TECHNICAL, route claude', async () => {
+    mockLlm.mockResolvedValueOnce('TECHNICAL');
+
+    const result = await classifyAndRoute(
+      '<messages>\n<message sender="Person1" time="2026-03-01T15:55:53.000Z">How do I write a React hook?</message>\n</messages>',
+    );
+
     expect(result.route).toBe('claude');
     expect(result.sensitivity).toBe('technical');
     expect(result.sanitized).toBe(false);
+    expect(mockLlm).toHaveBeenCalledTimes(1);
   });
 });

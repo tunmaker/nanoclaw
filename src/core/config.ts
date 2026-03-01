@@ -79,6 +79,10 @@ export const WHISPER_SERVER_URL = process.env.WHISPER_SERVER_URL ?? 'http://loca
 export const MCP_MEMORY_URL = process.env.MCP_MEMORY_URL ?? 'http://localhost:8052';
 export const LOGS_DIR = path.join(PROJECT_ROOT, 'logs');
 
+// Bypass the privacy router routing decision: still classify + audit-log,
+// but force everything to the local LLM. Set to 'true' to enable.
+export const ROUTE_BYPASS_LOCAL = process.env.ROUTE_BYPASS_LOCAL === 'true';
+
 // Mono-repo root and global persona files (nanoclaw lives at $ABBES_ROOT/nanoclaw)
 export const ABBES_ROOT =
   process.env.ABBES_ROOT ?? path.resolve(PROJECT_ROOT, '..');
