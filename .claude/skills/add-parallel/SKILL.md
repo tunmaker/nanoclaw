@@ -130,7 +130,7 @@ allowedTools: [
 
 ### 5. Add Usage Instructions to CLAUDE.md
 
-Add Parallel AI usage instructions to `groups/main/CLAUDE.md`:
+Add Parallel AI usage instructions to `whatsappData/groups/main/CLAUDE.md`:
 
 Find the "## What You Can Do" section and add after the existing bullet points:
 ```markdown
@@ -267,7 +267,7 @@ Look for: `Parallel AI MCP servers configured`
 **Container hangs or times out:**
 - Check that `type: 'http'` is specified in MCP server config
 - Verify API key is correct in .env
-- Check container logs: `cat groups/main/logs/container-*.log | tail -50`
+- Check container logs: `cat whatsappData/groups/main/logs/container-*.log | tail -50`
 
 **MCP servers not loading:**
 - Ensure PARALLEL_API_KEY is in .env
@@ -275,7 +275,7 @@ Look for: `Parallel AI MCP servers configured`
 - Check agent-runner logs for "Parallel AI MCP servers configured" message
 
 **Task polling not working:**
-- Verify scheduled task was created: `sqlite3 store/messages.db "SELECT * FROM scheduled_tasks"`
+- Verify scheduled task was created: `sqlite3 whatsappData/store/messages.db "SELECT * FROM scheduled_tasks"`
 - Check task runs: `tail -f logs/nanoclaw.log | grep "scheduled task"`
 - Ensure task prompt includes proper Parallel MCP tool names
 
@@ -285,6 +285,6 @@ To remove Parallel AI integration:
 
 1. Remove from .env: `sed -i.bak '/PARALLEL_API_KEY/d' .env`
 2. Revert changes to container-runner.ts and agent-runner/src/index.ts
-3. Remove Web Research Tools section from groups/main/CLAUDE.md
+3. Remove Web Research Tools section from whatsappData/groups/main/CLAUDE.md
 4. Rebuild: `./container/build.sh && npm run build`
 5. Restart: `launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `systemctl --user restart nanoclaw` (Linux)

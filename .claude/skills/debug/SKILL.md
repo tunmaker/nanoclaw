@@ -180,14 +180,14 @@ If an MCP server fails to start, the agent may exit. Check the container logs fo
 ### Test the full agent flow:
 ```bash
 # Set up env file
-mkdir -p data/env groups/test
+mkdir -p data/env whatsappData/groups/test
 cp .env data/env/env
 
 # Run test query
 echo '{"prompt":"What is 2+2?","groupFolder":"test","chatJid":"test@g.us","isMain":false}' | \
   docker run -i \
   -v $(pwd)/data/env:/workspace/env-dir:ro \
-  -v $(pwd)/groups/test:/workspace/group \
+  -v $(pwd)/whatsappData/groups/test:/workspace/group \
   -v $(pwd)/data/ipc:/workspace/ipc \
   nanoclaw-agent:latest
 ```

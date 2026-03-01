@@ -253,7 +253,7 @@ No ## headings. No [links](url). No **double stars**.
 
 #### 5b. Update existing group CLAUDE.md headings
 
-In any group CLAUDE.md that has a "WhatsApp Formatting" section (e.g. `groups/main/CLAUDE.md`), rename the heading to reflect multi-channel support:
+In any group CLAUDE.md that has a "WhatsApp Formatting" section (e.g. `whatsappData/groups/main/CLAUDE.md`), rename the heading to reflect multi-channel support:
 
 ```
 ## WhatsApp Formatting (and other messaging apps)

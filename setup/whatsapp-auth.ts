@@ -117,8 +117,8 @@ function emitAuthStatus(
 export async function run(args: string[]): Promise<void> {
   const projectRoot = process.cwd();
   const { method, phone } = parseArgs(args);
-  const statusFile = path.join(projectRoot, 'store', 'auth-status.txt');
-  const qrFile = path.join(projectRoot, 'store', 'qr-data.txt');
+  const statusFile = path.join(projectRoot, 'whatsappData', 'store', 'auth-status.txt');
+  const qrFile = path.join(projectRoot, 'whatsappData', 'store', 'qr-data.txt');
 
   if (!method) {
     emitAuthStatus('unknown', 'failed', 'failed', { ERROR: 'missing_method_flag' });

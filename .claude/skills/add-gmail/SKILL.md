@@ -217,7 +217,7 @@ You have access to Gmail via MCP tools:
 Example: "Check my unread emails from today" or "Send an email to john@example.com about the meeting"
 ```
 
-Also append the same section to `groups/main/CLAUDE.md`.
+Also append the same section to `whatsappData/groups/main/CLAUDE.md`.
 
 ### Step 4: Rebuild and Restart
 
@@ -671,7 +671,7 @@ npx -y @gongrzhe/server-gmail-autoauth-mcp
 
 ### Container can't access Gmail
 - Verify `~/.gmail-mcp` is mounted in container
-- Check container logs: `cat groups/main/logs/container-*.log | tail -50`
+- Check container logs: `cat whatsappData/groups/main/logs/container-*.log | tail -50`
 
 ---
 

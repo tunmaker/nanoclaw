@@ -96,11 +96,11 @@ Otherwise (macOS, desktop Linux, or WSL) → AskUserQuestion: QR code in browser
 - **Pairing code:** Ask for phone number first. `npx tsx setup/index.ts --step whatsapp-auth -- --method pairing-code --phone NUMBER` (Bash timeout: 150000ms). Display PAIRING_CODE.
 - **QR terminal:** `npx tsx setup/index.ts --step whatsapp-auth -- --method qr-terminal`. Tell user to run `npm run auth` in another terminal.
 
-**If failed:** qr_timeout → re-run. logged_out → delete `store/auth/` and re-run. 515 → re-run. timeout → ask user, offer retry.
+**If failed:** qr_timeout → re-run. logged_out → delete `whatsappData/store/auth/` and re-run. 515 → re-run. timeout → ask user, offer retry.
 
 ## 6. Configure Trigger and Channel Type
 
-Get bot's WhatsApp number: `node -e "const c=require('./store/auth/creds.json');console.log(c.me.id.split(':')[0].split('@')[0])"`
+Get bot's WhatsApp number: `node -e "const c=require('./whatsappData/store/auth/creds.json');console.log(c.me.id.split(':')[0].split('@')[0])"`
 
 AskUserQuestion: Shared number or dedicated? → AskUserQuestion: Trigger word? → AskUserQuestion: Main channel type?
 
@@ -177,7 +177,7 @@ Tell user to test: send a message in their registered chat. Show: `tail -f logs/
 
 **Service not starting:** Check `logs/nanoclaw.error.log`. Common: wrong Node path (re-run step 10), missing `.env` (step 4), missing auth (step 5).
 
-**Container agent fails ("Claude Code process exited with code 1"):** Ensure the container runtime is running — `open -a Docker` (macOS Docker), `container system start` (Apple Container), or `sudo systemctl start docker` (Linux). Check container logs in `groups/main/logs/container-*.log`.
+**Container agent fails ("Claude Code process exited with code 1"):** Ensure the container runtime is running — `open -a Docker` (macOS Docker), `container system start` (Apple Container), or `sudo systemctl start docker` (Linux). Check container logs in `whatsappData/groups/main/logs/container-*.log`.
 
 **No response to messages:** Check trigger pattern. Main channel doesn't need prefix. Check DB: `npx tsx setup/index.ts --step verify`. Check `logs/nanoclaw.log`.
 
