@@ -7,8 +7,8 @@ import path from 'path';
 
 import Database from 'better-sqlite3';
 
-import { STORE_DIR } from '../src/config.js';
-import { logger } from '../src/logger.js';
+import { STORE_DIR } from '../src/core/config.js';
+import { logger } from '../src/core/logger.js';
 import { commandExists, getPlatform, isHeadless, isWSL } from './platform.js';
 import { emitStatus } from './status.js';
 

@@ -1,10 +1,8 @@
-import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
 import {
   ASSISTANT_NAME,
-  DATA_DIR,
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
   POLL_INTERVAL,
@@ -12,14 +10,17 @@ import {
   TELEGRAM_ONLY,
   TRIGGER_PATTERN,
 } from './config.js';
-import { WhatsAppChannel } from './channels/whatsapp.js';
-import { TelegramChannel } from './channels/telegram.js';
+import { callLocalLlm } from './local-llm.js';
+import { WhatsAppChannel } from '../channels/whatsapp.js';
+import { TelegramChannel } from '../channels/telegram.js';
+import { classifyAndRoute } from '../intelligence/privacy-router.js';
 import {
   ContainerOutput,
   runContainerAgent,
   writeGroupsSnapshot,
   writeTasksSnapshot,
 } from './container-runner.js';
+import { cleanupOrphans, ensureContainerRuntimeRunning } from './container-runtime.js';
 import {
   getAllChats,
   getAllRegisteredGroups,
@@ -35,9 +36,17 @@ import {
   storeChatMetadata,
   storeMessage,
 } from './db.js';
+import {
+  getTelegramRegisteredGroups,
+  getTelegramNewMessages,
+  storeTelegramChatMetadata,
+  storeTelegramMessage,
+} from '../channels/telegram-db.js';
 import { GroupQueue } from './group-queue.js';
+import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
+import { startMemoryCron } from './memory-cron.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
@@ -66,6 +75,8 @@ function loadState(): void {
   }
   sessions = getAllSessions();
   registeredGroups = getAllRegisteredGroups();
+  // Merge in Telegram registered groups from their own DB
+  Object.assign(registeredGroups, getTelegramRegisteredGroups());
   logger.info(
     { groupCount: Object.keys(registeredGroups).length },
     'State loaded',
@@ -81,11 +92,21 @@ function saveState(): void {
 }
 
 function registerGroup(jid: string, group: RegisteredGroup): void {
+  let groupDir: string;
+  try {
+    groupDir = resolveGroupFolderPath(group.folder);
+  } catch (err) {
+    logger.warn(
+      { jid, folder: group.folder, err },
+      'Rejecting group registration with invalid folder',
+    );
+    return;
+  }
+
   registeredGroups[jid] = group;
   setRegisteredGroup(jid, group);
 
   // Create group folder
-  const groupDir = path.join(DATA_DIR, '..', 'groups', group.folder);
   fs.mkdirSync(path.join(groupDir, 'logs'), { recursive: true });
 
   logger.info(
@@ -126,12 +147,17 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   if (!group) return true;
 
   const channel = findChannel(channels, chatJid);
-  if (!channel) return true;
+  if (!channel) {
+    console.log(`Warning: no channel owns JID ${chatJid}, skipping messages`);
+    return true;
+  }
 
   const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
 
   const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
-  const missedMessages = getMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME);
+  const missedMessages = chatJid.startsWith('tg:')
+    ? getTelegramNewMessages([chatJid], sinceTimestamp, ASSISTANT_NAME).messages
+    : getMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME);
 
   if (missedMessages.length === 0) return true;
 
@@ -144,12 +170,42 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   }
 
   const prompt = formatMessages(missedMessages);
+  const lastMessage = missedMessages[missedMessages.length - 1];
+
+  // --- Classify and route (Phase 1: LLM-based privacy router) ---
+  const decision = await classifyAndRoute(prompt);
+  logger.info({ decision }, 'routing decision');
+
+  const messageToSend = decision.sanitizedMessage ?? prompt;
+
+  if (decision.route === 'local') {
+    // Local path — call llama.cpp directly, skip the container entirely
+    const prevCursor = lastAgentTimestamp[chatJid] || '';
+    lastAgentTimestamp[chatJid] = lastMessage.timestamp;
+    saveState();
+    logger.info(
+      { group: group.name, messageCount: missedMessages.length },
+      'Processing messages (local LLM)',
+    );
+    await channel.setTyping?.(chatJid, true);
+    try {
+      const reply = await callLocalLlm([{ role: 'user', content: messageToSend }]);
+      await channel.sendMessage(chatJid, reply);
+      return true;
+    } catch (err) {
+      logger.error({ err, group: group.name }, 'Local LLM error');
+      lastAgentTimestamp[chatJid] = prevCursor;
+      saveState();
+      return false;
+    } finally {
+      await channel.setTyping?.(chatJid, false);
+    }
+  }
 
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
   // these messages. Save the old cursor so we can roll back on error.
   const previousCursor = lastAgentTimestamp[chatJid] || '';
-  lastAgentTimestamp[chatJid] =
-    missedMessages[missedMessages.length - 1].timestamp;
+  lastAgentTimestamp[chatJid] = lastMessage.timestamp;
   saveState();
 
   logger.info(
@@ -172,7 +228,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   let hadError = false;
   let outputSentToUser = false;
 
-  const output = await runAgent(group, prompt, chatJid, async (result) => {
+  const output = await runAgent(group, messageToSend, chatJid, async (result) => {
     // Streaming output callback — called for each agent result
     if (result.result) {
       const raw = typeof result.result === 'string' ? result.result : JSON.stringify(result.result);
@@ -185,6 +241,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
       resetIdleTimer();
+    }
+
+    if (result.status === 'success') {
+      queue.notifyIdle(chatJid);
     }
 
     if (result.status === 'error') {
@@ -266,6 +326,7 @@ async function runAgent(
         groupFolder: group.folder,
         chatJid,
         isMain,
+        assistantName: ASSISTANT_NAME,
       },
       (proc, containerName) => queue.registerProcess(chatJid, proc, containerName, group.folder),
       wrappedOnOutput,
@@ -302,8 +363,18 @@ async function startMessageLoop(): Promise<void> {
 
   while (true) {
     try {
-      const jids = Object.keys(registeredGroups);
-      const { messages, newTimestamp } = getNewMessages(jids, lastTimestamp, ASSISTANT_NAME);
+      const allJids = Object.keys(registeredGroups);
+      const waJids = allJids.filter((j) => !j.startsWith('tg:'));
+      const tgJids = allJids.filter((j) => j.startsWith('tg:'));
+
+      // Fetch new messages from each DB separately
+      const waResult = getNewMessages(waJids, lastTimestamp, ASSISTANT_NAME);
+      const tgResult = getTelegramNewMessages(tgJids, lastTimestamp, ASSISTANT_NAME);
+
+      const messages = [...waResult.messages, ...tgResult.messages];
+      const newTimestamp = waResult.newTimestamp > tgResult.newTimestamp
+        ? waResult.newTimestamp
+        : tgResult.newTimestamp;
 
       if (messages.length > 0) {
         logger.info({ count: messages.length }, 'New messages');
@@ -328,7 +399,10 @@ async function startMessageLoop(): Promise<void> {
           if (!group) continue;
 
           const channel = findChannel(channels, chatJid);
-          if (!channel) continue;
+          if (!channel) {
+            console.log(`Warning: no channel owns JID ${chatJid}, skipping messages`);
+            continue;
+          }
 
           const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
           const needsTrigger = !isMainGroup && group.requiresTrigger !== false;
@@ -345,11 +419,9 @@ async function startMessageLoop(): Promise<void> {
 
           // Pull all messages since lastAgentTimestamp so non-trigger
           // context that accumulated between triggers is included.
-          const allPending = getMessagesSince(
-            chatJid,
-            lastAgentTimestamp[chatJid] || '',
-            ASSISTANT_NAME,
-          );
+          const allPending = chatJid.startsWith('tg:')
+            ? getTelegramNewMessages([chatJid], lastAgentTimestamp[chatJid] || '', ASSISTANT_NAME).messages
+            : getMessagesSince(chatJid, lastAgentTimestamp[chatJid] || '', ASSISTANT_NAME);
           const messagesToSend =
             allPending.length > 0 ? allPending : groupMessages;
           const formatted = formatMessages(messagesToSend);
@@ -363,7 +435,9 @@ async function startMessageLoop(): Promise<void> {
               messagesToSend[messagesToSend.length - 1].timestamp;
             saveState();
             // Show typing indicator while the container processes the piped message
-            channel.setTyping?.(chatJid, true);
+            channel.setTyping?.(chatJid, true)?.catch((err) =>
+              logger.warn({ chatJid, err }, 'Failed to set typing indicator'),
+            );
           } else {
             // No active container — enqueue for a new one
             queue.enqueueMessageCheck(chatJid);
@@ -384,7 +458,9 @@ async function startMessageLoop(): Promise<void> {
 function recoverPendingMessages(): void {
   for (const [chatJid, group] of Object.entries(registeredGroups)) {
     const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
-    const pending = getMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME);
+    const pending = chatJid.startsWith('tg:')
+      ? getTelegramNewMessages([chatJid], sinceTimestamp, ASSISTANT_NAME).messages
+      : getMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME);
     if (pending.length > 0) {
       logger.info(
         { group: group.name, pendingCount: pending.length },
@@ -396,65 +472,8 @@ function recoverPendingMessages(): void {
 }
 
 function ensureContainerSystemRunning(): void {
-  try {
-    execSync('container system status', { stdio: 'pipe' });
-    logger.debug('Apple Container system already running');
-  } catch {
-    logger.info('Starting Apple Container system...');
-    try {
-      execSync('container system start', { stdio: 'pipe', timeout: 30000 });
-      logger.info('Apple Container system started');
-    } catch (err) {
-      logger.error({ err }, 'Failed to start Apple Container system');
-      console.error(
-        '\n╔════════════════════════════════════════════════════════════════╗',
-      );
-      console.error(
-        '║  FATAL: Apple Container system failed to start                 ║',
-      );
-      console.error(
-        '║                                                                ║',
-      );
-      console.error(
-        '║  Agents cannot run without Apple Container. To fix:           ║',
-      );
-      console.error(
-        '║  1. Install from: https://github.com/apple/container/releases ║',
-      );
-      console.error(
-        '║  2. Run: container system start                               ║',
-      );
-      console.error(
-        '║  3. Restart NanoClaw                                          ║',
-      );
-      console.error(
-        '╚════════════════════════════════════════════════════════════════╝\n',
-      );
-      throw new Error('Apple Container system is required but failed to start');
-    }
-  }
-
-  // Kill and clean up orphaned NanoClaw containers from previous runs
-  try {
-    const output = execSync('container ls --format json', {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      encoding: 'utf-8',
-    });
-    const containers: { status: string; configuration: { id: string } }[] = JSON.parse(output || '[]');
-    const orphans = containers
-      .filter((c) => c.status === 'running' && c.configuration.id.startsWith('nanoclaw-'))
-      .map((c) => c.configuration.id);
-    for (const name of orphans) {
-      try {
-        execSync(`container stop ${name}`, { stdio: 'pipe' });
-      } catch { /* already stopped */ }
-    }
-    if (orphans.length > 0) {
-      logger.info({ count: orphans.length, names: orphans }, 'Stopped orphaned containers');
-    }
-  } catch (err) {
-    logger.warn({ err }, 'Failed to clean up orphaned containers');
-  }
+  ensureContainerRuntimeRunning();
+  cleanupOrphans();
 }
 
 async function main(): Promise<void> {
@@ -473,12 +492,20 @@ async function main(): Promise<void> {
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));
 
-  // Channel callbacks (shared by all channels)
+  // WhatsApp channel callbacks — write to whatsappData/store/messages.db
   const channelOpts = {
     onMessage: (_chatJid: string, msg: NewMessage) => storeMessage(msg),
     onChatMetadata: (chatJid: string, timestamp: string, name?: string, channel?: string, isGroup?: boolean) =>
       storeChatMetadata(chatJid, timestamp, name, channel, isGroup),
     registeredGroups: () => registeredGroups,
+  };
+
+  // Telegram channel callbacks — write to telegramData/telegram.db
+  const tgChannelOpts = {
+    onMessage: (_chatJid: string, msg: NewMessage) => storeTelegramMessage(msg),
+    onChatMetadata: (chatJid: string, timestamp: string, name?: string) =>
+      storeTelegramChatMetadata(chatJid, timestamp, name),
+    registeredGroups: () => getTelegramRegisteredGroups(),
   };
 
   // Create and connect channels
@@ -489,12 +516,13 @@ async function main(): Promise<void> {
   }
 
   if (TELEGRAM_BOT_TOKEN) {
-    const telegram = new TelegramChannel(TELEGRAM_BOT_TOKEN, channelOpts);
+    const telegram = new TelegramChannel(TELEGRAM_BOT_TOKEN, tgChannelOpts);
     channels.push(telegram);
     await telegram.connect();
   }
 
   // Start subsystems (independently of connection handler)
+  startMemoryCron();
   startSchedulerLoop({
     registeredGroups: () => registeredGroups,
     getSessions: () => sessions,
@@ -502,7 +530,10 @@ async function main(): Promise<void> {
     onProcess: (groupJid, proc, containerName, groupFolder) => queue.registerProcess(groupJid, proc, containerName, groupFolder),
     sendMessage: async (jid, rawText) => {
       const channel = findChannel(channels, jid);
-      if (!channel) return;
+      if (!channel) {
+        console.log(`Warning: no channel owns JID ${jid}, cannot send message`);
+        return;
+      }
       const text = formatOutbound(rawText);
       if (text) await channel.sendMessage(jid, text);
     },
@@ -521,7 +552,10 @@ async function main(): Promise<void> {
   });
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
-  startMessageLoop();
+  startMessageLoop().catch((err) => {
+    logger.fatal({ err }, 'Message loop crashed unexpectedly');
+    process.exit(1);
+  });
 }
 
 // Guard: only run when executed directly, not when imported by tests

@@ -11,8 +11,8 @@ import path from 'path';
 
 import Database from 'better-sqlite3';
 
-import { STORE_DIR } from '../src/config.js';
-import { logger } from '../src/logger.js';
+import { STORE_DIR } from '../src/core/config.js';
+import { logger } from '../src/core/logger.js';
 import { getPlatform, getServiceManager, hasSystemd, isRoot } from './platform.js';
 import { emitStatus } from './status.js';
 
@@ -99,7 +99,7 @@ export async function run(_args: string[]): Promise<void> {
 
   // 4. Check WhatsApp auth
   let whatsappAuth = 'not_found';
-  const authDir = path.join(projectRoot, 'store', 'auth');
+  const authDir = path.join(projectRoot, 'whatsappData', 'store', 'auth');
   if (fs.existsSync(authDir) && fs.readdirSync(authDir).length > 0) {
     whatsappAuth = 'authenticated';
   }

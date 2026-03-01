@@ -6,7 +6,7 @@ import { execSync, spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
-import { logger } from '../src/logger.js';
+import { logger } from '../src/core/logger.js';
 import { openBrowser, isHeadless } from './platform.js';
 import { emitStatus } from './status.js';
 
@@ -87,7 +87,7 @@ function readFileSafe(filePath: string): string {
 function getPhoneNumber(projectRoot: string): string {
   try {
     const creds = JSON.parse(
-      fs.readFileSync(path.join(projectRoot, 'store', 'auth', 'creds.json'), 'utf-8'),
+      fs.readFileSync(path.join(projectRoot, 'whatsappData', 'store', 'auth', 'creds.json'), 'utf-8'),
     );
     if (creds.me?.id) {
       return creds.me.id.split(':')[0].split('@')[0];
@@ -143,14 +143,14 @@ export async function run(args: string[]): Promise<void> {
 
   // Clean stale state
   logger.info({ method }, 'Starting WhatsApp auth');
-  try { fs.rmSync(path.join(projectRoot, 'store', 'auth'), { recursive: true, force: true }); } catch { /* ok */ }
+  try { fs.rmSync(path.join(projectRoot, 'whatsappData', 'store', 'auth'), { recursive: true, force: true }); } catch { /* ok */ }
   try { fs.unlinkSync(qrFile); } catch { /* ok */ }
   try { fs.unlinkSync(statusFile); } catch { /* ok */ }
 
   // Start auth process in background
   const authArgs = method === 'pairing-code'
-    ? ['src/whatsapp-auth.ts', '--pairing-code', '--phone', phone]
-    : ['src/whatsapp-auth.ts'];
+    ? ['src/core/whatsapp-auth.ts', '--pairing-code', '--phone', phone]
+    : ['src/core/whatsapp-auth.ts'];
 
   const authProc = spawn('npx', ['tsx', ...authArgs], {
     cwd: projectRoot,

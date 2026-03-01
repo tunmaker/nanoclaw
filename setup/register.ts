@@ -9,9 +9,9 @@ import path from 'path';
 
 import Database from 'better-sqlite3';
 
-import { STORE_DIR } from '../src/config.js';
-import { isValidGroupFolder } from '../src/group-folder.js';
-import { logger } from '../src/logger.js';
+import { STORE_DIR } from '../src/core/config.js';
+import { isValidGroupFolder } from '../src/core/group-folder.js';
+import { logger } from '../src/core/logger.js';
 import { emitStatus } from './status.js';
 
 interface RegisterArgs {

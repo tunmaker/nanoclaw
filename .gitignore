@@ -7,6 +7,7 @@ dist/
 # Runtime data — never commit auth state, session data, or downloaded media
 whatsappData/store/
 whatsappData/groups/
+telegramData/
 
 # App data (SQLite DB, agent session state)
 data/

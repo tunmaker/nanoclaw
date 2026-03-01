@@ -3,13 +3,14 @@ import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 // --- Mocks ---
 
 // Mock config
-vi.mock('../config.js', () => ({
+vi.mock('../core/config.js', () => ({
   ASSISTANT_NAME: 'Andy',
   TRIGGER_PATTERN: /^@Andy\b/i,
+  TELEGRAM_MEDIA_DIR: '/tmp/test-telegram/media',
 }));
 
 // Mock logger
-vi.mock('../logger.js', () => ({
+vi.mock('../core/logger.js', () => ({
   logger: {
     debug: vi.fn(),
     info: vi.fn(),
@@ -17,6 +18,12 @@ vi.mock('../logger.js', () => ({
     error: vi.fn(),
   },
 }));
+
+// Mock fs (so mkdirSync in connect() is a no-op in tests)
+vi.mock('fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('fs')>();
+  return { ...actual, mkdirSync: vi.fn() };
+});
 
 // --- Grammy mock ---
 

@@ -1,13 +1,15 @@
+import fs from 'fs';
+
 import { Bot } from 'grammy';
 
-import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
-import { logger } from '../logger.js';
+import { ASSISTANT_NAME, TELEGRAM_MEDIA_DIR, TRIGGER_PATTERN } from '../core/config.js';
+import { logger } from '../core/logger.js';
 import {
   Channel,
   OnChatMetadata,
   OnInboundMessage,
   RegisteredGroup,
-} from '../types.js';
+} from '../core/types.js';
 
 export interface TelegramChannelOpts {
   onMessage: OnInboundMessage;
@@ -28,6 +30,7 @@ export class TelegramChannel implements Channel {
   }
 
   async connect(): Promise<void> {
+    fs.mkdirSync(TELEGRAM_MEDIA_DIR, { recursive: true });
     this.bot = new Bot(this.botToken);
 
     // Command to get chat ID (useful for registration)
@@ -64,6 +67,7 @@ export class TelegramChannel implements Channel {
         'Unknown';
       const sender = ctx.from?.id.toString() || '';
       const msgId = ctx.message.message_id.toString();
+      const isGroup = ctx.chat.type !== 'private';
 
       // Determine chat name
       const chatName =
@@ -91,8 +95,8 @@ export class TelegramChannel implements Channel {
         }
       }
 
-      // Store chat metadata for discovery
-      this.opts.onChatMetadata(chatJid, timestamp, chatName);
+      // Notify orchestrator of chat metadata (name stored by orchestrator's tg-specific callback)
+      this.opts.onChatMetadata(chatJid, timestamp, chatName, 'telegram', isGroup);
 
       // Only deliver full message for registered groups
       const group = this.opts.registeredGroups()[chatJid];
@@ -134,8 +138,9 @@ export class TelegramChannel implements Channel {
         ctx.from?.id?.toString() ||
         'Unknown';
       const caption = ctx.message.caption ? ` ${ctx.message.caption}` : '';
+      const isGroup = ctx.chat.type !== 'private';
 
-      this.opts.onChatMetadata(chatJid, timestamp);
+      this.opts.onChatMetadata(chatJid, timestamp, undefined, 'telegram', isGroup);
       this.opts.onMessage(chatJid, {
         id: ctx.message.message_id.toString(),
         chat_jid: chatJid,

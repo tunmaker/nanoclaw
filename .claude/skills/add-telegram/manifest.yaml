@@ -5,10 +5,11 @@ core_version: 0.1.0
 adds:
   - src/channels/telegram.ts
   - src/channels/telegram.test.ts
+  - src/channels/telegram-db.ts
 modifies:
-  - src/index.ts
-  - src/config.ts
-  - src/routing.test.ts
+  - src/core/index.ts
+  - src/core/config.ts
+  - src/core/routing.test.ts
 structured:
   npm_dependencies:
     grammy: "^1.39.3"

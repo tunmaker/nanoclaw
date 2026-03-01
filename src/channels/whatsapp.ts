@@ -167,10 +167,15 @@ export class WhatsAppChannel implements Channel {
       if (connection === 'close') {
         this.connected = false;
         const reason = (lastDisconnect?.error as { output?: { statusCode?: number } })?.output?.statusCode;
-        const shouldReconnect = reason !== DisconnectReason.loggedOut;
+        const isLoggedOut = reason === DisconnectReason.loggedOut;
+        const isReplaced = reason === DisconnectReason.connectionReplaced;
+        const shouldReconnect = !isLoggedOut && !isReplaced;
         logger.info({ reason, shouldReconnect, queuedMessages: this.outgoingQueue.length }, 'Connection closed');
 
-        if (shouldReconnect) {
+        if (isReplaced) {
+          logger.info('Connection replaced by another session. Exiting so systemd can restart with backoff.');
+          process.exit(1);
+        } else if (shouldReconnect) {
           logger.info('Reconnecting...');
           this.connectInternal().catch((err) => {
             logger.error({ err }, 'Failed to reconnect, retrying in 5s');

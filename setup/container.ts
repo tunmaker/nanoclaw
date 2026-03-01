@@ -5,7 +5,7 @@
 import { execSync } from 'child_process';
 import path from 'path';
 
-import { logger } from '../src/logger.js';
+import { logger } from '../src/core/logger.js';
 import { commandExists } from './platform.js';
 import { emitStatus } from './status.js';
 
@@ -75,7 +75,7 @@ export async function run(args: string[]): Promise<void> {
     process.exit(4);
   }
 
-  const buildCmd = runtime === 'apple-container' ? 'container build' : 'docker build';
+  const buildCmd = runtime === 'apple-container' ? 'container build' : 'docker build --network=host';
   const runCmd = runtime === 'apple-container' ? 'container' : 'docker';
 
   // Build

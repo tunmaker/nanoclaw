@@ -32,6 +32,8 @@ export const MOUNT_ALLOWLIST_PATH = path.join(
 export const STORE_DIR = path.resolve(PROJECT_ROOT, 'whatsappData', 'store');
 export const MEDIA_DIR = path.resolve(PROJECT_ROOT, 'whatsappData', 'store', 'media');
 export const GROUPS_DIR = path.resolve(PROJECT_ROOT, 'whatsappData', 'groups');
+export const TELEGRAM_MEDIA_DIR = path.resolve(PROJECT_ROOT, 'telegramData', 'media');
+export const TELEGRAM_DB_PATH = path.resolve(PROJECT_ROOT, 'telegramData', 'telegram.db');
 export const DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
 export const MAIN_GROUP_FOLDER = 'main';
 
@@ -73,4 +75,11 @@ export const TIMEZONE =
 export const ROUTING_CONFIG_PATH = path.join(PROJECT_ROOT, 'configs/routing.yaml');
 export const PRIVACY_CONFIG_PATH = path.join(PROJECT_ROOT, 'configs/privacy.yaml');
 export const LOCAL_LLM_URL = process.env.LOCAL_LLM_URL ?? 'http://localhost:8080/v1';
+export const WHISPER_SERVER_URL = process.env.WHISPER_SERVER_URL ?? 'http://localhost:8178';
+export const MCP_MEMORY_URL = process.env.MCP_MEMORY_URL ?? 'http://localhost:8052';
 export const LOGS_DIR = path.join(PROJECT_ROOT, 'logs');
+
+// Mono-repo root and global persona files (nanoclaw lives at $ABBES_ROOT/nanoclaw)
+export const ABBES_ROOT =
+  process.env.ABBES_ROOT ?? path.resolve(PROJECT_ROOT, '..');
+export const PERSONA_DIR = path.join(ABBES_ROOT, 'persona');

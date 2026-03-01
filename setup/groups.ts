@@ -9,8 +9,8 @@ import path from 'path';
 
 import Database from 'better-sqlite3';
 
-import { STORE_DIR } from '../src/config.js';
-import { logger } from '../src/logger.js';
+import { STORE_DIR } from '../src/core/config.js';
+import { logger } from '../src/core/logger.js';
 import { emitStatus } from './status.js';
 
 function parseArgs(args: string[]): { list: boolean; limit: number } {
@@ -93,8 +93,8 @@ import fs from 'fs';
 import Database from 'better-sqlite3';
 
 const logger = pino({ level: 'silent' });
-const authDir = path.join('store', 'auth');
-const dbPath = path.join('store', 'messages.db');
+const authDir = path.join('whatsappData', 'store', 'auth');
+const dbPath = path.join('whatsappData', 'store', 'messages.db');
 
 if (!fs.existsSync(authDir)) {
   console.error('NO_AUTH');

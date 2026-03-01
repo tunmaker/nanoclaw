@@ -9,7 +9,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { logger } from '../src/logger.js';
+import { logger } from '../src/core/logger.js';
 import {
   getPlatform,
   getNodePath,
@@ -20,11 +20,20 @@ import {
 } from './platform.js';
 import { emitStatus } from './status.js';
 
+function getEntrypoint(projectRoot: string): string {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(projectRoot, 'package.json'), 'utf-8'));
+    if (pkg.main) return path.join(projectRoot, pkg.main);
+  } catch { /* fall through */ }
+  return path.join(projectRoot, 'dist', 'index.js');
+}
+
 export async function run(_args: string[]): Promise<void> {
   const projectRoot = process.cwd();
   const platform = getPlatform();
   const nodePath = getNodePath();
   const homeDir = os.homedir();
+  const entrypoint = getEntrypoint(projectRoot);
 
   logger.info({ platform, nodePath, projectRoot }, 'Setting up service');
 
@@ -52,9 +61,9 @@ export async function run(_args: string[]): Promise<void> {
   fs.mkdirSync(path.join(projectRoot, 'logs'), { recursive: true });
 
   if (platform === 'macos') {
-    setupLaunchd(projectRoot, nodePath, homeDir);
+    setupLaunchd(projectRoot, nodePath, homeDir, entrypoint);
   } else if (platform === 'linux') {
-    setupLinux(projectRoot, nodePath, homeDir);
+    setupLinux(projectRoot, nodePath, homeDir, entrypoint);
   } else {
     emitStatus('SETUP_SERVICE', {
       SERVICE_TYPE: 'unknown',
@@ -68,7 +77,7 @@ export async function run(_args: string[]): Promise<void> {
   }
 }
 
-function setupLaunchd(projectRoot: string, nodePath: string, homeDir: string): void {
+function setupLaunchd(projectRoot: string, nodePath: string, homeDir: string, entrypoint: string): void {
   const plistPath = path.join(homeDir, 'Library', 'LaunchAgents', 'com.nanoclaw.plist');
   fs.mkdirSync(path.dirname(plistPath), { recursive: true });
 
@@ -81,7 +90,7 @@ function setupLaunchd(projectRoot: string, nodePath: string, homeDir: string): v
     <key>ProgramArguments</key>
     <array>
         <string>${nodePath}</string>
-        <string>${projectRoot}/dist/index.js</string>
+        <string>${entrypoint}</string>
     </array>
     <key>WorkingDirectory</key>
     <string>${projectRoot}</string>
@@ -133,14 +142,14 @@ function setupLaunchd(projectRoot: string, nodePath: string, homeDir: string): v
   });
 }
 
-function setupLinux(projectRoot: string, nodePath: string, homeDir: string): void {
+function setupLinux(projectRoot: string, nodePath: string, homeDir: string, entrypoint: string): void {
   const serviceManager = getServiceManager();
 
   if (serviceManager === 'systemd') {
-    setupSystemd(projectRoot, nodePath, homeDir);
+    setupSystemd(projectRoot, nodePath, homeDir, entrypoint);
   } else {
     // WSL without systemd or other Linux without systemd
-    setupNohupFallback(projectRoot, nodePath, homeDir);
+    setupNohupFallback(projectRoot, nodePath, homeDir, entrypoint);
   }
 }
 
@@ -148,9 +157,9 @@ function setupLinux(projectRoot: string, nodePath: string, homeDir: string): voi
  * Kill any orphaned nanoclaw node processes left from previous runs or debugging.
  * Prevents WhatsApp "conflict" disconnects when two instances connect simultaneously.
  */
-function killOrphanedProcesses(projectRoot: string): void {
+function killOrphanedProcesses(projectRoot: string, entrypoint: string): void {
   try {
-    execSync(`pkill -f '${projectRoot}/dist/index\\.js' || true`, {
+    execSync(`pkill -f '${entrypoint.replace(/\./g, '\\.')}' || true`, {
       stdio: 'ignore',
     });
     logger.info('Stopped any orphaned nanoclaw processes');
@@ -186,7 +195,7 @@ function checkDockerGroupStale(): boolean {
   }
 }
 
-function setupSystemd(projectRoot: string, nodePath: string, homeDir: string): void {
+function setupSystemd(projectRoot: string, nodePath: string, homeDir: string, entrypoint: string): void {
   const runningAsRoot = isRoot();
 
   // Root uses system-level service, non-root uses user-level
@@ -203,7 +212,7 @@ function setupSystemd(projectRoot: string, nodePath: string, homeDir: string): v
       execSync('systemctl --user daemon-reload', { stdio: 'pipe' });
     } catch {
       logger.warn('systemd user session not available — falling back to nohup wrapper');
-      setupNohupFallback(projectRoot, nodePath, homeDir);
+      setupNohupFallback(projectRoot, nodePath, homeDir, entrypoint);
       return;
     }
     const unitDir = path.join(homeDir, '.config', 'systemd', 'user');
@@ -218,7 +227,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=${nodePath} ${projectRoot}/dist/index.js
+ExecStart=${nodePath} ${entrypoint}
 WorkingDirectory=${projectRoot}
 Restart=always
 RestartSec=5
@@ -242,7 +251,7 @@ WantedBy=${runningAsRoot ? 'multi-user.target' : 'default.target'}`;
   }
 
   // Kill orphaned nanoclaw processes to avoid WhatsApp conflict errors
-  killOrphanedProcesses(projectRoot);
+  killOrphanedProcesses(projectRoot, entrypoint);
 
   // Enable and start
   try {
@@ -284,7 +293,7 @@ WantedBy=${runningAsRoot ? 'multi-user.target' : 'default.target'}`;
   });
 }
 
-function setupNohupFallback(projectRoot: string, nodePath: string, homeDir: string): void {
+function setupNohupFallback(projectRoot: string, nodePath: string, homeDir: string, entrypoint: string): void {
   logger.warn('No systemd detected — generating nohup wrapper script');
 
   const wrapperPath = path.join(projectRoot, 'start-nanoclaw.sh');
@@ -310,7 +319,7 @@ function setupNohupFallback(projectRoot: string, nodePath: string, homeDir: stri
     'fi',
     '',
     'echo "Starting NanoClaw..."',
-    `nohup ${JSON.stringify(nodePath)} ${JSON.stringify(projectRoot + '/dist/index.js')} \\`,
+    `nohup ${JSON.stringify(nodePath)} ${JSON.stringify(entrypoint)} \\`,
     `  >> ${JSON.stringify(projectRoot + '/logs/nanoclaw.log')} \\`,
     `  2>> ${JSON.stringify(projectRoot + '/logs/nanoclaw.error.log')} &`,
     '',

@@ -118,6 +118,10 @@ Tell the user:
 >
 > This is optional if you only want trigger-based responses via @mentioning the bot.
 
+### Data directory
+
+Telegram stores downloaded media in `telegramData/media/` (created automatically on first start). This mirrors how WhatsApp uses `whatsappData/`. The `telegramData/` directory is gitignored — it is never committed.
+
 ### Build and restart
 
 ```bash
@@ -140,30 +144,36 @@ Wait for the user to provide the chat ID (format: `tg:123456789` or `tg:-1001234
 
 ### Register the chat
 
-Use the IPC register flow or register directly. The chat ID, name, and folder name are needed.
-
-For a main chat (responds to all messages, uses the `main` folder):
+Telegram registrations live in `telegramData/telegram.db`, not the WhatsApp database. Use `setTelegramRegisteredGroup` from `src/channels/telegram-db.ts`:
 
 ```typescript
-registerGroup("tg:<chat-id>", {
+import { setTelegramRegisteredGroup } from './src/channels/telegram-db.js';
+
+// Main chat (responds to all messages, uses the `main` folder):
+setTelegramRegisteredGroup("tg:<chat-id>", {
   name: "<chat-name>",
   folder: "main",
   trigger: `@${ASSISTANT_NAME}`,
   added_at: new Date().toISOString(),
   requiresTrigger: false,
 });
-```
 
-For additional chats (trigger-only):
-
-```typescript
-registerGroup("tg:<chat-id>", {
+// Additional chats (trigger-only):
+setTelegramRegisteredGroup("tg:<chat-id>", {
   name: "<chat-name>",
   folder: "<folder-name>",
   trigger: `@${ASSISTANT_NAME}`,
   added_at: new Date().toISOString(),
   requiresTrigger: true,
 });
+```
+
+Or via the SQLite CLI directly:
+
+```bash
+sqlite3 telegramData/telegram.db \
+  "INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, requires_trigger) \
+   VALUES ('tg:<chat-id>', '<chat-name>', 'main', '@Abbes', datetime('now'), 0)"
 ```
 
 ## Phase 5: Verify
@@ -190,7 +200,7 @@ tail -f logs/nanoclaw.log
 
 Check:
 1. `TELEGRAM_BOT_TOKEN` is set in `.env` AND synced to `data/env/env`
-2. Chat is registered in SQLite (check with: `sqlite3 store/messages.db "SELECT * FROM registered_groups WHERE jid LIKE 'tg:%'"`)
+2. Chat is registered in SQLite (check with: `sqlite3 whatsappData/store/messages.db "SELECT * FROM registered_groups WHERE jid LIKE 'tg:%'"`)
 3. For non-main chats: message includes trigger pattern
 4. Service is running: `launchctl list | grep nanoclaw` (macOS) or `systemctl --user status nanoclaw` (Linux)
 
@@ -233,11 +243,13 @@ If they say yes, invoke the `/add-telegram-swarm` skill.
 
 To remove Telegram integration:
 
-1. Delete `src/channels/telegram.ts`
-2. Remove `TelegramChannel` import and creation from `src/index.ts`
-3. Remove `channels` array and revert to using `whatsapp` directly in `processGroupMessages`, scheduler deps, and IPC deps
-4. Revert `getAvailableGroups()` filter to only include `@g.us` chats
-5. Remove Telegram config (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_ONLY`) from `src/config.ts`
-6. Remove Telegram registrations from SQLite: `sqlite3 store/messages.db "DELETE FROM registered_groups WHERE jid LIKE 'tg:%'"`
-7. Uninstall: `npm uninstall grammy`
-8. Rebuild: `npm run build && launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `npm run build && systemctl --user restart nanoclaw` (Linux)
+1. Delete `src/channels/telegram.ts`, `src/channels/telegram-db.ts`, `src/channels/telegram.test.ts`
+2. Remove `TelegramChannel` and `telegram-db` imports and creation from `src/core/index.ts`
+3. Remove `tgChannelOpts` and revert to single `channelOpts` if WhatsApp-only
+4. Remove `channels` array and revert to using `whatsapp` directly in `processGroupMessages`, scheduler deps, and IPC deps
+5. Revert `startMessageLoop()` to only call `getNewMessages()` (remove `getTelegramNewMessages` branch)
+6. Revert `getAvailableGroups()` filter to only include `@g.us` chats
+7. Remove `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ONLY`, `TELEGRAM_MEDIA_DIR`, `TELEGRAM_DB_PATH` from `src/core/config.ts`
+8. Optionally delete `telegramData/` (contains the Telegram DB and media — no WhatsApp data is in there)
+9. Uninstall: `npm uninstall grammy`
+10. Rebuild: `npm run build && systemctl --user restart nanoclaw` (Linux) or `launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS)
