@@ -33,9 +33,12 @@ export interface RoutingDecision {
 const CLASSIFY_PROMPT = (msg: string): string =>
   `Classify this message. Reply with exactly one word.
 
-PRIVATE  = personal info, names, relationships, health, finances, location
-TECHNICAL = code, debugging, architecture, research, general knowledge
-MIXED    = has both technical content AND personal identifying information
+PRIVATE   = greetings, casual chat, questions about personal life, health, finances, passwords, home address, private relationships
+TECHNICAL = code, debugging, architecture, system design, research, factual questions, general knowledge
+MIXED     = contains BOTH a technical question AND sensitive personal details (e.g. "debug my code, my password is X")
+
+Note: sender display names in group chats are NOT personal information.
+When in doubt between PRIVATE and TECHNICAL, prefer PRIVATE.
 
 Message: "${msg}"
 
