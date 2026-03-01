@@ -135,15 +135,16 @@ WhatsApp (baileys) --> SQLite --> Polling loop --> Container (Claude Agent SDK) 
 Single Node.js process. Agents execute in isolated Linux containers with mounted directories. Per-group message queue with concurrency control. IPC via filesystem.
 
 Key files:
-- `src/index.ts` - Orchestrator: state, message loop, agent invocation
+- `src/core/index.ts` - Orchestrator: state, message loop, agent invocation
 - `src/channels/whatsapp.ts` - WhatsApp connection, auth, send/receive
-- `src/ipc.ts` - IPC watcher and task processing
-- `src/router.ts` - Message formatting and outbound routing
-- `src/group-queue.ts` - Per-group queue with global concurrency limit
-- `src/container-runner.ts` - Spawns streaming agent containers
-- `src/task-scheduler.ts` - Runs scheduled tasks
-- `src/db.ts` - SQLite operations (messages, groups, sessions, state)
-- `groups/*/CLAUDE.md` - Per-group memory
+- `src/core/ipc.ts` - IPC watcher and task processing
+- `src/core/router.ts` - Message formatting and outbound routing
+- `src/core/group-queue.ts` - Per-group queue with global concurrency limit
+- `src/core/container-runner.ts` - Spawns streaming agent containers
+- `src/core/task-scheduler.ts` - Runs scheduled tasks
+- `src/core/db.ts` - SQLite operations (messages, groups, sessions, state)
+- `src/intelligence/privacy-router.ts` - LLM-based privacy classifier and router
+- `whatsappData/groups/*/CLAUDE.md` - Per-group memory
 
 ## FAQ
 

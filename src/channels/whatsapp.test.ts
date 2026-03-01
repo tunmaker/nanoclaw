@@ -4,7 +4,7 @@ import { EventEmitter } from 'events';
 // --- Mocks ---
 
 // Mock config
-vi.mock('../config.js', () => ({
+vi.mock('../core/config.js', () => ({
   STORE_DIR: '/tmp/nanoclaw-test-store',
   MEDIA_DIR: '/tmp/nanoclaw-test-media',
   ASSISTANT_NAME: 'Andy',
@@ -12,7 +12,7 @@ vi.mock('../config.js', () => ({
 }));
 
 // Mock logger
-vi.mock('../logger.js', () => ({
+vi.mock('../core/logger.js', () => ({
   logger: {
     debug: vi.fn(),
     info: vi.fn(),
@@ -22,11 +22,11 @@ vi.mock('../logger.js', () => ({
 }));
 
 // Mock db
-vi.mock('../env.js', () => ({
+vi.mock('../core/env.js', () => ({
   readEnvFile: vi.fn(() => ({})),
 }));
 
-vi.mock('../db.js', () => ({
+vi.mock('../core/db.js', () => ({
   getLastGroupSync: vi.fn(() => null),
   setLastGroupSync: vi.fn(),
   updateChatName: vi.fn(),
@@ -103,7 +103,7 @@ vi.mock('@whiskeysockets/baileys', () => {
 });
 
 import { WhatsAppChannel, WhatsAppChannelOpts } from './whatsapp.js';
-import { getLastGroupSync, updateChatName, setLastGroupSync } from '../db.js';
+import { getLastGroupSync, updateChatName, setLastGroupSync } from '../core/db.js';
 
 // --- Test helpers ---
 

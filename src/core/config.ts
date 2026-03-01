@@ -29,9 +29,9 @@ export const MOUNT_ALLOWLIST_PATH = path.join(
   'nanoclaw',
   'mount-allowlist.json',
 );
-export const STORE_DIR = path.resolve(PROJECT_ROOT, 'store');
-export const MEDIA_DIR = path.resolve(PROJECT_ROOT, 'store', 'media');
-export const GROUPS_DIR = path.resolve(PROJECT_ROOT, 'groups');
+export const STORE_DIR = path.resolve(PROJECT_ROOT, 'whatsappData', 'store');
+export const MEDIA_DIR = path.resolve(PROJECT_ROOT, 'whatsappData', 'store', 'media');
+export const GROUPS_DIR = path.resolve(PROJECT_ROOT, 'whatsappData', 'groups');
 export const DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
 export const MAIN_GROUP_FOLDER = 'main';
 

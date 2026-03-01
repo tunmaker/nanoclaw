@@ -4,13 +4,15 @@ node_modules/
 # Build output
 dist/
 
-# Local data & auth
-store/
-data/
-logs/
+# Runtime data — never commit auth state, session data, or downloaded media
+whatsappData/store/
+whatsappData/groups/
 
-# Groups - never track group memory (contains personal data)
-groups/
+# App data (SQLite DB, agent session state)
+data/
+
+# Audit & process logs
+logs/
 
 # Secrets & credentials
 .env
@@ -30,6 +32,11 @@ creds.json
 nanoclaw.pid
 start-nanoclaw.sh
 setup.log
+
+# Python (legacy, not used)
+.pytest_cache/
+__pycache__/
+*.pyc
 
 # OS
 .DS_Store
@@ -51,4 +58,7 @@ Thumbs.db
 .claude/todos/
 
 agents-sdk-docs
-tunmaker/
+
+# Planning / scratch files
+plan.md
+plans.md

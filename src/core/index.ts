@@ -9,9 +9,8 @@ import {
   TRIGGER_PATTERN,
 } from './config.js';
 import { callLocalLlm } from './local-llm.js';
-import { PrivacyFilter } from './privacy.js';
-import { Router } from './routing.js';
-import { WhatsAppChannel } from './channels/whatsapp.js';
+import { WhatsAppChannel } from '../channels/whatsapp.js';
+import { classifyAndRoute } from '../intelligence/privacy-router.js';
 import {
   ContainerOutput,
   runContainerAgent,
@@ -55,13 +54,7 @@ let whatsapp: WhatsAppChannel;
 const channels: Channel[] = [];
 const queue = new GroupQueue();
 
-// Initialized in loadState() — only used after startup
-let router!: Router;
-let privacyFilter!: PrivacyFilter;
-
 function loadState(): void {
-  router = new Router();
-  privacyFilter = new PrivacyFilter();
   lastTimestamp = getRouterState('last_timestamp') || '';
   const agentTs = getRouterState('last_agent_timestamp');
   try {
@@ -165,11 +158,13 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const prompt = formatMessages(missedMessages);
   const lastMessage = missedMessages[missedMessages.length - 1];
 
-  // --- Route ---
-  const decision = router.route(prompt, lastMessage.id);
+  // --- Classify and route (Phase 1: LLM-based privacy router) ---
+  const decision = await classifyAndRoute(prompt);
   logger.info({ decision }, 'routing decision');
 
-  if (decision.routedTo === 'local') {
+  const messageToSend = decision.sanitizedMessage ?? prompt;
+
+  if (decision.route === 'local') {
     // Local path — call llama.cpp directly, skip the container entirely
     const prevCursor = lastAgentTimestamp[chatJid] || '';
     lastAgentTimestamp[chatJid] = lastMessage.timestamp;
@@ -180,7 +175,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     );
     await channel.setTyping?.(chatJid, true);
     try {
-      const reply = await callLocalLlm([{ role: 'user', content: prompt }]);
+      const reply = await callLocalLlm([{ role: 'user', content: messageToSend }]);
       await channel.sendMessage(chatJid, reply);
       return true;
     } catch (err) {
@@ -192,14 +187,6 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       await channel.setTyping?.(chatJid, false);
     }
   }
-
-  // --- Privacy (Claude path) ---
-  privacyFilter.checkPrivacyMode();
-  const [sanitized, redacted] = privacyFilter.sanitize(prompt);
-  if (redacted.length > 0) {
-    logger.warn({ redacted, messageId: lastMessage.id }, 'privacy: redacted fields');
-  }
-  privacyFilter.logOutbound('claude', [{ role: 'user', content: sanitized }], lastMessage.id);
 
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
   // these messages. Save the old cursor so we can roll back on error.
@@ -227,7 +214,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   let hadError = false;
   let outputSentToUser = false;
 
-  const output = await runAgent(group, sanitized, chatJid, async (result) => {
+  const output = await runAgent(group, messageToSend, chatJid, async (result) => {
     // Streaming output callback — called for each agent result
     if (result.result) {
       const raw = typeof result.result === 'string' ? result.result : JSON.stringify(result.result);

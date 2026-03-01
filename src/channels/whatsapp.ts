@@ -12,15 +12,15 @@ import makeWASocket, {
   makeCacheableSignalKeyStore,
   useMultiFileAuthState,
 } from '@whiskeysockets/baileys';
-import { ASSISTANT_HAS_OWN_NUMBER, ASSISTANT_NAME, MEDIA_DIR, STORE_DIR } from '../config.js';
-import { readEnvFile } from '../env.js';
+import { ASSISTANT_HAS_OWN_NUMBER, ASSISTANT_NAME, MEDIA_DIR, STORE_DIR } from '../core/config.js';
+import { readEnvFile } from '../core/env.js';
 import {
   getLastGroupSync,
   setLastGroupSync,
   updateChatName,
-} from '../db.js';
-import { logger } from '../logger.js';
-import { Channel, MediaAttachment, OnInboundMessage, OnChatMetadata, RegisteredGroup } from '../types.js';
+} from '../core/db.js';
+import { logger } from '../core/logger.js';
+import { Channel, MediaAttachment, OnInboundMessage, OnChatMetadata, RegisteredGroup } from '../core/types.js';
 
 const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
