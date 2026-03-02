@@ -22,6 +22,16 @@ describe('JID ownership patterns', () => {
     const jid = '12345678@s.whatsapp.net';
     expect(jid.endsWith('@s.whatsapp.net')).toBe(true);
   });
+
+  it('Telegram JID: starts with tg:', () => {
+    const jid = 'tg:123456789';
+    expect(jid.startsWith('tg:')).toBe(true);
+  });
+
+  it('Telegram group JID: starts with tg: and negative chat ID', () => {
+    const jid = 'tg:-1001234567890';
+    expect(jid.startsWith('tg:')).toBe(true);
+  });
 });
 
 // --- getAvailableGroups ---
@@ -96,5 +106,32 @@ describe('getAvailableGroups', () => {
   it('returns empty array when no chats exist', () => {
     const groups = getAvailableGroups();
     expect(groups).toHaveLength(0);
+  });
+
+  it('Telegram registered groups appear in registeredGroups but not in getAvailableGroups (WhatsApp DB only)', () => {
+    // Telegram chats are stored in telegramData/telegram.db, not the WhatsApp DB.
+    // getAvailableGroups() reads from getAllChats() which only covers the WhatsApp DB.
+    // Telegram groups are still tracked via _setRegisteredGroups for routing purposes.
+    storeChatMetadata('group@g.us', '2024-01-01T00:00:01.000Z', 'WA Group', 'whatsapp', true);
+
+    _setRegisteredGroups({
+      'group@g.us': {
+        name: 'WA Group',
+        folder: 'main',
+        trigger: '@Andy',
+        added_at: '2024-01-01T00:00:00.000Z',
+      },
+      'tg:123456789': {
+        name: 'TG Group',
+        folder: 'main',
+        trigger: '@Andy',
+        added_at: '2024-01-01T00:00:00.000Z',
+      },
+    });
+
+    const groups = getAvailableGroups();
+    // Only WhatsApp groups appear (Telegram not in WhatsApp DB)
+    expect(groups).toHaveLength(1);
+    expect(groups[0].jid).toBe('group@g.us');
   });
 });

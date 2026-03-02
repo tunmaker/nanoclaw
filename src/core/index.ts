@@ -6,10 +6,13 @@ import {
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
   POLL_INTERVAL,
+  TELEGRAM_BOT_TOKEN,
+  TELEGRAM_ONLY,
   TRIGGER_PATTERN,
 } from './config.js';
 import { callLocalLlm } from './local-llm.js';
 import { WhatsAppChannel } from '../channels/whatsapp.js';
+import { TelegramChannel } from '../channels/telegram.js';
 import { classifyAndRoute } from '../intelligence/privacy-router.js';
 import {
   ContainerOutput,
@@ -33,6 +36,12 @@ import {
   storeChatMetadata,
   storeMessage,
 } from './db.js';
+import {
+  getTelegramRegisteredGroups,
+  getTelegramNewMessages,
+  storeTelegramChatMetadata,
+  storeTelegramMessage,
+} from '../channels/telegram-db.js';
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
@@ -66,6 +75,8 @@ function loadState(): void {
   }
   sessions = getAllSessions();
   registeredGroups = getAllRegisteredGroups();
+  // Merge in Telegram registered groups from their own DB
+  Object.assign(registeredGroups, getTelegramRegisteredGroups());
   logger.info(
     { groupCount: Object.keys(registeredGroups).length },
     'State loaded',
@@ -144,7 +155,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
 
   const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
-  const missedMessages = getMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME);
+  const missedMessages = chatJid.startsWith('tg:')
+    ? getTelegramNewMessages([chatJid], sinceTimestamp, ASSISTANT_NAME).messages
+    : getMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME);
 
   if (missedMessages.length === 0) return true;
 
@@ -350,8 +363,18 @@ async function startMessageLoop(): Promise<void> {
 
   while (true) {
     try {
-      const jids = Object.keys(registeredGroups);
-      const { messages, newTimestamp } = getNewMessages(jids, lastTimestamp, ASSISTANT_NAME);
+      const allJids = Object.keys(registeredGroups);
+      const waJids = allJids.filter((j) => !j.startsWith('tg:'));
+      const tgJids = allJids.filter((j) => j.startsWith('tg:'));
+
+      // Fetch new messages from each DB separately
+      const waResult = getNewMessages(waJids, lastTimestamp, ASSISTANT_NAME);
+      const tgResult = getTelegramNewMessages(tgJids, lastTimestamp, ASSISTANT_NAME);
+
+      const messages = [...waResult.messages, ...tgResult.messages];
+      const newTimestamp = waResult.newTimestamp > tgResult.newTimestamp
+        ? waResult.newTimestamp
+        : tgResult.newTimestamp;
 
       if (messages.length > 0) {
         logger.info({ count: messages.length }, 'New messages');
@@ -396,11 +419,9 @@ async function startMessageLoop(): Promise<void> {
 
           // Pull all messages since lastAgentTimestamp so non-trigger
           // context that accumulated between triggers is included.
-          const allPending = getMessagesSince(
-            chatJid,
-            lastAgentTimestamp[chatJid] || '',
-            ASSISTANT_NAME,
-          );
+          const allPending = chatJid.startsWith('tg:')
+            ? getTelegramNewMessages([chatJid], lastAgentTimestamp[chatJid] || '', ASSISTANT_NAME).messages
+            : getMessagesSince(chatJid, lastAgentTimestamp[chatJid] || '', ASSISTANT_NAME);
           const messagesToSend =
             allPending.length > 0 ? allPending : groupMessages;
           const formatted = formatMessages(messagesToSend);
@@ -437,7 +458,9 @@ async function startMessageLoop(): Promise<void> {
 function recoverPendingMessages(): void {
   for (const [chatJid, group] of Object.entries(registeredGroups)) {
     const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
-    const pending = getMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME);
+    const pending = chatJid.startsWith('tg:')
+      ? getTelegramNewMessages([chatJid], sinceTimestamp, ASSISTANT_NAME).messages
+      : getMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME);
     if (pending.length > 0) {
       logger.info(
         { group: group.name, pendingCount: pending.length },
@@ -469,7 +492,7 @@ async function main(): Promise<void> {
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));
 
-  // Channel callbacks (shared by all channels)
+  // WhatsApp channel callbacks — write to whatsappData/store/messages.db
   const channelOpts = {
     onMessage: (_chatJid: string, msg: NewMessage) => storeMessage(msg),
     onChatMetadata: (chatJid: string, timestamp: string, name?: string, channel?: string, isGroup?: boolean) =>
@@ -477,10 +500,28 @@ async function main(): Promise<void> {
     registeredGroups: () => registeredGroups,
   };
 
+  // Telegram channel callbacks — write to telegramData/telegram.db
+  const tgChannelOpts = {
+    onMessage: (_chatJid: string, msg: NewMessage) => storeTelegramMessage(msg),
+    onChatMetadata: (chatJid: string, timestamp: string, name?: string) =>
+      storeTelegramChatMetadata(chatJid, timestamp, name),
+    registeredGroups: () => getTelegramRegisteredGroups(),
+  };
+
   // Create and connect channels
-  whatsapp = new WhatsAppChannel(channelOpts);
-  channels.push(whatsapp);
-  await whatsapp.connect();
+  // WhatsApp is intentionally disabled (TELEGRAM_ONLY=true in .env).
+  // To re-enable: remove TELEGRAM_ONLY=true from .env and re-authenticate with npm run auth.
+  if (!TELEGRAM_ONLY) {
+    whatsapp = new WhatsAppChannel(channelOpts);
+    channels.push(whatsapp);
+    await whatsapp.connect();
+  }
+
+  if (TELEGRAM_BOT_TOKEN) {
+    const telegram = new TelegramChannel(TELEGRAM_BOT_TOKEN, tgChannelOpts);
+    channels.push(telegram);
+    await telegram.connect();
+  }
 
   // Start subsystems (independently of connection handler)
   startMemoryCron();
