@@ -1,0 +1,18 @@
+[Unit]
+Description=whisper.cpp HTTP transcription server
+After=network.target
+
+[Service]
+Type=simple
+EnvironmentFile=__HOME__/.config/abbes/services.env
+WorkingDirectory=__ABBES_ROOT__/whisper.cpp
+ExecStart=__ABBES_ROOT__/whisper.cpp/build/bin/whisper-server \
+    --port ${WHISPER_SERVER_PORT} \
+    --model __ABBES_ROOT__/whisper.cpp/models/ggml-base.bin
+Restart=on-failure
+RestartSec=5
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Install]
+WantedBy=default.target

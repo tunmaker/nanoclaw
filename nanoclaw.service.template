@@ -1,0 +1,18 @@
+[Unit]
+Description=Abbes Agent (nanoclaw)
+After=network.target llama-server.service mcp-memory.service whisper.service
+Wants=llama-server.service mcp-memory.service whisper.service
+
+[Service]
+Type=simple
+EnvironmentFile=__HOME__/.config/abbes/services.env
+EnvironmentFile=-__HOME__/.config/nanoclaw/env
+WorkingDirectory=__INSTALL_DIR__
+ExecStart=__NODE__ __INSTALL_DIR__/dist/core/index.js
+Restart=on-failure
+RestartSec=10
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Install]
+WantedBy=default.target
