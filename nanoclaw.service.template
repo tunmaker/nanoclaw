@@ -5,7 +5,7 @@ Wants=llama-server.service mcp-memory.service whisper.service
 
 [Service]
 Type=simple
-EnvironmentFile=__HOME__/.config/abbes/services.env
+EnvironmentFile=-__HOME__/.config/abbes/services.env
 EnvironmentFile=-__HOME__/.config/nanoclaw/env
 WorkingDirectory=__INSTALL_DIR__
 ExecStart=__NODE__ __INSTALL_DIR__/dist/core/index.js

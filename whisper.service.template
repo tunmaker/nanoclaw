@@ -4,7 +4,7 @@ After=network.target
 
 [Service]
 Type=simple
-EnvironmentFile=__HOME__/.config/abbes/services.env
+EnvironmentFile=-__HOME__/.config/abbes/services.env
 WorkingDirectory=__ABBES_ROOT__/whisper.cpp
 ExecStart=__ABBES_ROOT__/whisper.cpp/build/bin/whisper-server \
     --port ${WHISPER_SERVER_PORT} \
