@@ -34,7 +34,7 @@ function scheduleNext(name: string, cronExpr: string, handler: () => Promise<voi
 
 export function startMemoryCron(): void {
   scheduleNext('memory-consolidation', '0 2 * * *', async () => {
-    const result = await triggerConsolidation(false);
+    const result = await triggerConsolidation();
     logger.info({ result }, 'Memory consolidation complete');
   });
 

@@ -10,10 +10,11 @@ import {
   TELEGRAM_ONLY,
   TRIGGER_PATTERN,
 } from './config.js';
-import { callLocalLlm } from './local-llm.js';
 import { WhatsAppChannel } from '../channels/whatsapp.js';
 import { TelegramChannel } from '../channels/telegram.js';
 import { classifyAndRoute } from '../intelligence/privacy-router.js';
+import { runLocalAgent } from '../intelligence/local-agent.js';
+import type { AgentMessage } from '../intelligence/local-agent.js';
 import {
   ContainerOutput,
   runContainerAgent,
@@ -48,7 +49,7 @@ import { startIpcWatcher } from './ipc.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import { startMemoryCron } from './memory-cron.js';
 import { startSchedulerLoop } from './task-scheduler.js';
-import { Channel, NewMessage, RegisteredGroup } from './types.js';
+import { Channel, MediaAttachment, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 
 // Re-export for backwards compatibility during refactor
@@ -138,6 +139,14 @@ export function _setRegisteredGroups(groups: Record<string, RegisteredGroup>): v
   registeredGroups = groups;
 }
 
+/** Map a MediaAttachment type to the AgentMessage mediaType (audio/image/video). */
+function mapMediaType(type: MediaAttachment['type']): AgentMessage['mediaType'] {
+  if (type === 'image') return 'image';
+  if (type === 'video') return 'video';
+  if (type === 'audio' || type === 'voice') return 'audio';
+  return undefined;
+}
+
 /**
  * Process all pending messages for a group.
  * Called by the GroupQueue when it's this group's turn.
@@ -187,13 +196,22 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       { group: group.name, messageCount: missedMessages.length },
       'Processing messages (local LLM)',
     );
+    // Wire media from the triggering message into the local agent
+    const lastMedia = lastMessage.media?.[0];
+    const agentMsg: AgentMessage = {
+      text: messageToSend,
+      mediaPath: lastMedia?.filePath,
+      mediaType: lastMedia ? mapMediaType(lastMedia.type) : undefined,
+      channelContext: chatJid,
+    };
+
     await channel.setTyping?.(chatJid, true);
     try {
-      const reply = await callLocalLlm([{ role: 'user', content: messageToSend }]);
+      const reply = await runLocalAgent(agentMsg);
       await channel.sendMessage(chatJid, reply);
       return true;
     } catch (err) {
-      logger.error({ err, group: group.name }, 'Local LLM error');
+      logger.error({ err, group: group.name }, 'Local agent error');
       lastAgentTimestamp[chatJid] = prevCursor;
       saveState();
       return false;

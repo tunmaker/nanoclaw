@@ -79,6 +79,7 @@ export const PRIVACY_CONFIG_PATH = path.join(PROJECT_ROOT, 'configs/privacy.yaml
 export const LOCAL_LLM_URL = process.env.LOCAL_LLM_URL ?? 'http://localhost:8080/v1';
 export const WHISPER_SERVER_URL = process.env.WHISPER_SERVER_URL ?? 'http://localhost:8178';
 export const MCP_MEMORY_URL = process.env.MCP_MEMORY_URL ?? 'http://localhost:8052';
+export const MCP_MEMORY_API_KEY = process.env.MCP_MEMORY_API_KEY ?? '';
 export const LOGS_DIR = path.join(PROJECT_ROOT, 'logs');
 
 // Mono-repo root and global persona files (nanoclaw lives at $ABBES_ROOT/nanoclaw)

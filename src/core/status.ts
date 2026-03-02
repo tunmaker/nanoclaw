@@ -33,7 +33,7 @@ async function checkService(name: string, url: string, timeoutMs = 3000): Promis
 async function checkMemory(timeoutMs = 3000): Promise<ServiceStatus> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-  const url = `${MCP_MEMORY_URL}/health`;
+  const url = `${MCP_MEMORY_URL}/api/health`;
 
   try {
     const response = await fetch(url, { signal: controller.signal });
@@ -41,9 +41,10 @@ async function checkMemory(timeoutMs = 3000): Promise<ServiceStatus> {
     if (!response.ok) {
       return { name: 'Memory', url, ok: false, detail: `HTTP ${response.status}` };
     }
-    const data = (await response.json()) as { status?: string; count?: number };
-    const count = data.count !== undefined ? `${data.count} memories` : 'responding';
-    return { name: 'Memory', url, ok: true, detail: count };
+    const data = (await response.json()) as { status?: string; uptime_seconds?: number };
+    const detail =
+      data.uptime_seconds !== undefined ? `up ${data.uptime_seconds}s` : 'responding';
+    return { name: 'Memory', url, ok: true, detail };
   } catch (err) {
     clearTimeout(timeoutId);
     const message = err instanceof Error ? err.message : String(err);
