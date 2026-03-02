@@ -33,6 +33,7 @@ function db(): Database.Database {
         timestamp TEXT,
         is_from_me INTEGER,
         is_bot_message INTEGER DEFAULT 0,
+        media_json TEXT,
         PRIMARY KEY (id, chat_jid)
       );
       CREATE INDEX IF NOT EXISTS idx_tg_timestamp ON messages(timestamp);
@@ -46,6 +47,12 @@ function db(): Database.Database {
         requires_trigger INTEGER DEFAULT 1
       );
     `);
+    // Migration: add media_json to existing DBs created before this column existed
+    try {
+      _db.exec(`ALTER TABLE messages ADD COLUMN media_json TEXT`);
+    } catch {
+      // Column already exists — safe to ignore
+    }
   }
   return _db;
 }
@@ -74,8 +81,8 @@ export function storeTelegramChatMetadata(
 export function storeTelegramMessage(msg: NewMessage): void {
   db().prepare(
     `INSERT OR REPLACE INTO messages
-       (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+       (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message, media_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     msg.id,
     msg.chat_jid,
@@ -85,6 +92,7 @@ export function storeTelegramMessage(msg: NewMessage): void {
     msg.timestamp,
     msg.is_from_me ? 1 : 0,
     msg.is_bot_message ? 1 : 0,
+    msg.media ? JSON.stringify(msg.media) : null,
   );
 }
 
@@ -97,19 +105,23 @@ export function getTelegramNewMessages(
 
   const placeholders = jids.map(() => '?').join(',');
   const rows = db().prepare(
-    `SELECT id, chat_jid, sender, sender_name, content, timestamp
+    `SELECT id, chat_jid, sender, sender_name, content, timestamp, media_json
      FROM messages
      WHERE timestamp > ? AND chat_jid IN (${placeholders})
        AND is_bot_message = 0 AND content NOT LIKE ?
-       AND content != '' AND content IS NOT NULL
      ORDER BY timestamp`,
-  ).all(lastTimestamp, ...jids, `${botPrefix}:%`) as NewMessage[];
+  ).all(lastTimestamp, ...jids, `${botPrefix}:%`) as Array<NewMessage & { media_json?: string }>;
 
   let newTimestamp = lastTimestamp;
-  for (const row of rows) {
+  const messages: NewMessage[] = rows.map((row) => {
     if (row.timestamp > newTimestamp) newTimestamp = row.timestamp;
-  }
-  return { messages: rows, newTimestamp };
+    const { media_json, ...msg } = row;
+    if (media_json) {
+      try { msg.media = JSON.parse(media_json) as NewMessage['media']; } catch { /* ignore */ }
+    }
+    return msg;
+  });
+  return { messages, newTimestamp };
 }
 
 export function getTelegramRegisteredGroups(): Record<string, RegisteredGroup> {

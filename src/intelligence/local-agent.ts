@@ -10,6 +10,7 @@
  *   3. ReAct loop: LLM → tool calls → results → repeat (max 8 iterations)
  *   4. On stop: fire-and-forget memory storage, return response text
  */
+import { spawn } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -193,36 +194,6 @@ const LOCAL_TOOLS = [
   {
     type: 'function',
     function: {
-      name: 'analyse_image',
-      description: 'Analyse an image file using the local multimodal LLM.',
-      parameters: {
-        type: 'object',
-        properties: {
-          path: { type: 'string', description: 'Path to the image file.' },
-          prompt: { type: 'string', description: 'Question or instruction for the image.' },
-        },
-        required: ['path', 'prompt'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'analyse_video',
-      description: 'Analyse a video file using the local multimodal LLM.',
-      parameters: {
-        type: 'object',
-        properties: {
-          path: { type: 'string', description: 'Path to the video file.' },
-          prompt: { type: 'string', description: 'Question or instruction for the video.' },
-        },
-        required: ['path', 'prompt'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
       name: 'transcribe_audio',
       description: 'Transcribe an audio file using the local whisper server.',
       parameters: {
@@ -257,12 +228,27 @@ function safePath(p: string): string {
 // Media helpers
 // ---------------------------------------------------------------------------
 
-/** Transcribe audio via whisper server; deletes file in finally. */
+/** Convert any audio file to 16kHz mono WAV using ffmpeg (whisper.cpp requirement). */
+function convertToWav(inputPath: string, outputPath: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const proc = spawn('ffmpeg', ['-y', '-i', inputPath, '-ar', '16000', '-ac', '1', outputPath]);
+    proc.on('close', (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`ffmpeg exited with code ${code}`));
+    });
+    proc.on('error', (err) => reject(new Error(`ffmpeg spawn failed: ${err.message}`)));
+  });
+}
+
+/** Transcribe audio via whisper server; converts to WAV first, deletes both files in finally. */
 async function transcribeAudio(audioPath: string): Promise<string> {
+  const wavPath = audioPath.replace(/\.[^.]+$/, '.wav');
   try {
-    const audioBuffer = fs.readFileSync(audioPath);
+    await convertToWav(audioPath, wavPath);
+
+    const audioBuffer = fs.readFileSync(wavPath);
     const formData = new FormData();
-    formData.append('file', new Blob([audioBuffer]), path.basename(audioPath));
+    formData.append('file', new Blob([audioBuffer]), path.basename(wavPath));
     formData.append('response_format', 'json');
 
     const controller = new AbortController();
@@ -286,11 +272,8 @@ async function transcribeAudio(audioPath: string): Promise<string> {
   } catch (err) {
     return `Transcription error: ${err instanceof Error ? err.message : String(err)}`;
   } finally {
-    try {
-      fs.unlinkSync(audioPath);
-    } catch {
-      // ignore — file may already be gone
-    }
+    try { fs.unlinkSync(audioPath); } catch { /* original audio — may already be gone */ }
+    try { fs.unlinkSync(wavPath); } catch { /* converted WAV */ }
   }
 }
 
@@ -454,14 +437,6 @@ async function dispatchTool(name: string, args: Record<string, unknown>): Promis
       return 'File written.';
     }
 
-    case 'analyse_image': {
-      return await analyseMedia(String(args.path ?? ''), String(args.prompt ?? ''), 'image');
-    }
-
-    case 'analyse_video': {
-      return await analyseMedia(String(args.path ?? ''), String(args.prompt ?? ''), 'video');
-    }
-
     case 'transcribe_audio': {
       return await transcribeAudio(String(args.path ?? ''));
     }
@@ -568,6 +543,9 @@ export async function runLocalAgent(message: AgentMessage, debug?: AgentDebugHoo
   ];
 
   let lastText = '';
+  // Vision requests: skip tools on the first call so the model describes the
+  // image directly instead of trying to invoke analyse_image with a stale path.
+  const hasVisionContent = Array.isArray(firstUserContent);
 
   for (let i = 0; i < MAX_ITERATIONS; i++) {
     debug?.onIteration?.(i + 1);
@@ -576,6 +554,8 @@ export async function runLocalAgent(message: AgentMessage, debug?: AgentDebugHoo
     const timeoutId = setTimeout(() => controller.abort(), 120_000);
     let llmResponse: LlmResponse;
 
+    const skipTools = hasVisionContent && i === 0;
+
     try {
       const res = await fetch(`${LOCAL_LLM_URL}/chat/completions`, {
         method: 'POST',
@@ -583,7 +563,7 @@ export async function runLocalAgent(message: AgentMessage, debug?: AgentDebugHoo
         body: JSON.stringify({
           model: 'default',
           messages,
-          tools: LOCAL_TOOLS,
+          ...(skipTools ? {} : { tools: LOCAL_TOOLS }),
           max_tokens: 1024,
         }),
         signal: controller.signal,
